@@ -8,8 +8,6 @@ const YAW_SPEED = 0.8
 const ROLL_SPEED = 1.0
 
 // Throttle
-const THROTTLE_ACCEL = 0.4   // per second (0-1 in ~2.5s)
-const THROTTLE_DECEL = 0.4
 const IMPULSE_MAX_SPEED = 1.0
 const WARP_MULTIPLIER = 8.0
 
@@ -111,8 +109,8 @@ export function updateShip(
   // Torpedo fire (single press T)
   state.torpedoFiring = input.wasJustPressed('KeyT') && state.torpedoCount > 0
 
-  // --- Shields toggle (Shift) ---
-  if (input.wasJustPressed('ShiftLeft') || input.wasJustPressed('ShiftRight')) {
+  // --- Shields toggle (X) ---
+  if (input.wasJustPressed('KeyX')) {
     state.shieldsActive = !state.shieldsActive
   }
 

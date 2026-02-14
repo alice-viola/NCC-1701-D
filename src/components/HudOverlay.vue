@@ -118,16 +118,18 @@ const speed = computed(() => props.state.speed)
       <div class="speed-line right" :style="{ opacity: Math.min(speed * 0.4, 0.8) }" />
     </div>
 
-    <!-- Controls hint (fades after 10s) -->
+    <!-- Controls hint -->
     <div class="controls-hint">
-      <span>ARROWS: Steer</span>
-      <span>W/S: Throttle</span>
-      <span>A/D: Roll</span>
-      <span>E: Engage Warp</span>
+      <span>W/S: Pitch</span>
+      <span>A/D: Yaw</span>
+      <span>Q/E: Roll</span>
+      <span>0-9: Speed</span>
+      <span>CAPS: Warp</span>
+      <span>X: Shields</span>
       <span>SPACE: Phasers</span>
       <span>T: Torpedo</span>
-      <span>Q: Shields</span>
       <span>M: Star Map</span>
+      <span>F: Photo Mode</span>
     </div>
   </div>
 </template>

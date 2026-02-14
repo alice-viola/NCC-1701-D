@@ -474,6 +474,12 @@ onMounted(async () => {
   }
 
   window.addEventListener('resize', onWindowResize)
+
+  // Mouse events for free camera mode
+  const canvas = canvasRef.value!
+  canvas.addEventListener('mousedown', (e) => { if (freeCam) onFreeCameraMouseDown(freeCam, e) })
+  canvas.addEventListener('mousemove', (e) => { if (freeCam) onFreeCameraMouseMove(freeCam, e) })
+  canvas.addEventListener('mouseup', () => { if (freeCam) onFreeCameraMouseUp(freeCam) })
 })
 
 onUnmounted(() => {
@@ -513,6 +519,14 @@ onUnmounted(() => {
       class="warp-flash"
       :style="{ opacity: warpFlash }"
     />
+
+    <!-- Photo mode indicator -->
+    <div v-if="photoMode" class="photo-mode-indicator">
+      <div class="photo-label">PHOTO MODE</div>
+      <div class="photo-controls">
+        WASD: Move | Q/E: Up/Down | Mouse Drag: Look | ,/.: Zoom | R: Reset | F: Exit
+      </div>
+    </div>
 
     <!-- System arrival notification -->
     <Transition name="slide-down">
@@ -1001,5 +1015,36 @@ onUnmounted(() => {
 
 .lcars-btn.decline:hover {
   background: #445566;
+}
+
+/* Photo mode indicator */
+.photo-mode-indicator {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 8;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid #cc770060;
+  border-radius: 8px;
+  padding: 8px 20px;
+}
+
+.photo-label {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.3rem;
+  color: #cc7700;
+}
+
+.photo-controls {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.55rem;
+  letter-spacing: 0.1rem;
+  color: #8899aa;
+  margin-top: 4px;
 }
 </style>

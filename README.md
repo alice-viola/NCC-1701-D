@@ -1,5 +1,30 @@
-# Vue 3 + TypeScript + Vite
+<![CDATA[![Enterprise](public/README.png)
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+![Enterprise](public/README_2.png)
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+# Star Trek Enterprise — Browser Game
+
+Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game built with Vue 3, Three.js, and TypeScript.
+
+## Controls
+
+| Key | Action |
+|-----|--------|
+| W / S | Pitch up / down |
+| A / D | Yaw left / right |
+| Q / E | Roll |
+| 0–9 | Set speed |
+| CapsLock | Toggle warp |
+| Space | Fire phasers |
+| T | Fire torpedo |
+| X | Toggle shields |
+| M | Star map |
+| F | Photo mode |
+
+## Run
+
+```bash
+npm install
+npm run dev
+```
+]]>
