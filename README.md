@@ -2,11 +2,12 @@
 
 Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game built with Vue 3, Three.js, and TypeScript.
 
+![Enterprise](public/ST.png)
+
 ![Enterprise](public/README.png)
 
 ![Enterprise](public/README_3.png)
 
-![Enterprise](public/README_4.png)
 
 ## Controls
 
