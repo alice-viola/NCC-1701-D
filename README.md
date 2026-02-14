@@ -1,4 +1,4 @@
-<![CDATA[![Enterprise](public/README.png)
+![Enterprise](public/README.png)
 
 ![Enterprise](public/README_2.png)
 
@@ -27,4 +27,3 @@ Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game bui
 npm install
 npm run dev
 ```
-]]>
