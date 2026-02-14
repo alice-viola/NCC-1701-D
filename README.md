@@ -1,10 +1,10 @@
-![Enterprise](public/README.png)
-
-![Enterprise](public/README_2.png)
-
 # Star Trek Enterprise — Browser Game
 
 Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game built with Vue 3, Three.js, and TypeScript.
+
+![Enterprise](public/README.png)
+
+![Enterprise](public/README_2.png)
 
 ## Controls
 
@@ -27,3 +27,5 @@ Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game bui
 npm install
 npm run dev
 ```
+
+Go to [localhost:5173](http://localhost:5173) to play the game.
