@@ -4,8 +4,6 @@ Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game bui
 
 ![Enterprise](public/README.png)
 
-![Enterprise](public/README_2.png)
-
 ![Enterprise](public/README_3.png)
 
 ![Enterprise](public/README_4.png)
@@ -22,7 +20,6 @@ Command the USS Enterprise NCC-1701-D in a fully browser-based 3D space game bui
 | Space | Fire phasers |
 | T | Fire torpedo |
 | X | Toggle shields |
-| M | Star map |
 | F | Photo mode |
 
 ## Run

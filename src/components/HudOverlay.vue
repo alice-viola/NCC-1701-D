@@ -128,7 +128,6 @@ const speed = computed(() => props.state.speed)
       <span>X: Shields</span>
       <span>SPACE: Phasers</span>
       <span>T: Torpedo</span>
-      <span>M: Star Map</span>
       <span>F: Photo Mode</span>
     </div>
   </div>
@@ -454,14 +453,8 @@ const speed = computed(() => props.state.speed)
   transform: translateX(-50%);
   display: flex;
   gap: 16px;
-  font-size: 0.55rem;
+  font-size: 0.65rem;
   letter-spacing: 0.08rem;
-  color: rgba(150, 130, 100, 0.5);
-  animation: fadeHint 12s ease forwards;
-}
-
-@keyframes fadeHint {
-  0%, 60% { opacity: 1; }
-  100% { opacity: 0; }
+  color: rgba(150, 140, 120, 0.6);
 }
 </style>

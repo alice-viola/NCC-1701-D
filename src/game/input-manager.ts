@@ -56,7 +56,7 @@ export class InputManager {
 /** Keys the game listens to — preventDefault on these to avoid scrolling. */
 const GAME_KEYS = new Set([
   'KeyW', 'KeyS', 'KeyA', 'KeyD', 'KeyQ', 'KeyE',
-  'Space', 'KeyT', 'KeyM', 'KeyF', 'KeyR', 'KeyX',
+  'Space', 'KeyT', 'KeyF', 'KeyR', 'KeyX',
   'CapsLock',
   'Comma', 'Period',
   'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4',

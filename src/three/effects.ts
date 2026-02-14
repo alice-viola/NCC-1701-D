@@ -1,6 +1,139 @@
 import * as THREE from 'three'
 
 // ---------------------------------------------------------------------------
+// Explosions — particle system
+// ---------------------------------------------------------------------------
+
+export interface Explosion {
+  group: THREE.Group
+  particles: THREE.Points
+  velocities: Float32Array
+  age: number
+  maxAge: number
+  /** Flash light */
+  light: THREE.PointLight
+}
+
+/**
+ * Creates a particle explosion at the given position.
+ * @param position World position of the explosion
+ * @param type 'phaser' for small orange sparks, 'torpedo' for big red-orange blast
+ */
+export function createExplosion(
+  position: THREE.Vector3,
+  type: 'phaser' | 'torpedo' = 'torpedo',
+): Explosion {
+  const group = new THREE.Group()
+  group.position.copy(position)
+
+  const count = type === 'torpedo' ? 20 : 8
+  const speed = type === 'torpedo' ? 20 : 10
+  const maxAge = type === 'torpedo' ? 0.8 : 0.3
+  const size = type === 'torpedo' ? 0.8 : 0.35
+
+  const positions = new Float32Array(count * 3)
+  const colors = new Float32Array(count * 3)
+  const sizes = new Float32Array(count)
+  const velocities = new Float32Array(count * 3)
+
+  for (let i = 0; i < count; i++) {
+    // All start at center
+    positions[i * 3] = 0
+    positions[i * 3 + 1] = 0
+    positions[i * 3 + 2] = 0
+
+    // Random outward velocity (spherical)
+    const theta = Math.random() * Math.PI * 2
+    const phi = Math.acos(2 * Math.random() - 1)
+    const v = speed * (0.3 + Math.random() * 0.7)
+    velocities[i * 3] = Math.sin(phi) * Math.cos(theta) * v
+    velocities[i * 3 + 1] = Math.sin(phi) * Math.sin(theta) * v
+    velocities[i * 3 + 2] = Math.cos(phi) * v
+
+    // Color: mix of orange, yellow, white for torpedo / orange sparks for phaser
+    if (type === 'torpedo') {
+      const t = Math.random()
+      colors[i * 3] = 1.0
+      colors[i * 3 + 1] = 0.3 + t * 0.5
+      colors[i * 3 + 2] = t * 0.2
+    } else {
+      colors[i * 3] = 1.0
+      colors[i * 3 + 1] = 0.5 + Math.random() * 0.3
+      colors[i * 3 + 2] = 0.1
+    }
+
+    sizes[i] = size * (0.5 + Math.random() * 0.5)
+  }
+
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+  geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1))
+
+  const mat = new THREE.PointsMaterial({
+    size,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1.0,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+  })
+
+  const particles = new THREE.Points(geo, mat)
+  group.add(particles)
+
+  // Flash light
+  const lightColor = type === 'torpedo' ? 0xff6622 : 0xff8833
+  const lightIntensity = type === 'torpedo' ? 8 : 3
+  const light = new THREE.PointLight(lightColor, lightIntensity, type === 'torpedo' ? 80 : 30)
+  group.add(light)
+
+  return { group, particles, velocities, age: 0, maxAge, light }
+}
+
+/**
+ * Update an explosion each frame — move particles outward, fade out.
+ */
+export function updateExplosion(exp: Explosion, delta: number): void {
+  exp.age += delta
+  const lifeRatio = exp.age / exp.maxAge
+
+  const posAttr = exp.particles.geometry.getAttribute('position') as THREE.BufferAttribute
+  const positions = posAttr.array as Float32Array
+  const count = positions.length / 3
+
+  // Move particles outward, slow them down over time
+  const drag = 1 - lifeRatio * 0.8
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] += exp.velocities[i * 3] * delta * drag
+    positions[i * 3 + 1] += exp.velocities[i * 3 + 1] * delta * drag
+    positions[i * 3 + 2] += exp.velocities[i * 3 + 2] * delta * drag
+  }
+  posAttr.needsUpdate = true
+
+  // Fade out
+  const mat = exp.particles.material as THREE.PointsMaterial
+  mat.opacity = Math.max(0, 1 - lifeRatio * lifeRatio)
+
+  // Shrink particles
+  mat.size = mat.size * (1 - delta * 1.5)
+
+  // Fade light
+  exp.light.intensity *= Math.max(0, 1 - delta * 4)
+}
+
+/**
+ * Dispose explosion resources.
+ */
+export function disposeExplosion(exp: Explosion, scene: THREE.Scene): void {
+  scene.remove(exp.group)
+  exp.particles.geometry.dispose()
+  ;(exp.particles.material as THREE.Material).dispose()
+  exp.light.dispose()
+}
+
+// ---------------------------------------------------------------------------
 // Phaser Beam
 // ---------------------------------------------------------------------------
 

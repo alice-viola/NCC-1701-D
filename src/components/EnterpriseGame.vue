@@ -19,10 +19,11 @@ import { updateShip } from '../game/ship-controller'
 import { updateCamera } from '../game/camera-controller'
 import { createWeaponSystem, updateWeapons, disposeWeapons } from '../game/weapon-system'
 import type { WeaponSystemState } from '../game/weapon-system'
+import { createExplosion, updateExplosion, disposeExplosion } from '../three/effects'
+import type { Explosion } from '../three/effects'
 import { createShieldSystem, updateShields } from '../game/shield-system'
 import type { ShieldSystemState } from '../game/shield-system'
 import HudOverlay from './HudOverlay.vue'
-import StarMap from './StarMap.vue'
 import { createAudioManager, initAudio, updateAudio, disposeAudio } from '../game/audio-manager'
 import type { AudioManager } from '../game/audio-manager'
 import { updateWarpEffect } from '../three/warp-effect'
@@ -35,22 +36,13 @@ import type { FreeCameraState } from '../game/free-camera'
 import type { SceneContext } from '../three/scene'
 import type { PostProcessingSetup } from '../three/post-processing'
 import type { AnimationState } from '../three/animation'
-
-// Universe, NPC, and Mission systems
-import {
-  createUniverseState, setDestination, initiateWarp,
-  updateTravel, clearDestination,
-} from '../game/universe-manager'
-import type { UniverseState } from '../game/universe-manager'
 import { getSystem } from '../game/universe'
-// NPC system disabled until proper models are available
-// import { createNpcSystem, spawnNpcs, updateNpcs, disposeNpcs } from '../game/npc-system'
-// import type { NpcSystemState } from '../game/npc-system'
-import {
-  createMissionState, checkMissionObjectives,
-  getActiveMission, getNextObjective, getAvailableMissions, acceptMission,
-} from '../game/mission-system'
-import type { MissionState, Mission } from '../game/mission-system'
+
+// Combat & Enemy
+import { createCombatState, syncPlayerShields, updateCombatTimers, checkPhaserHits, checkTorpedoHits } from '../game/combat-system'
+import type { CombatState } from '../game/combat-system'
+import { createEnemyShip, updateEnemyAI, disposeEnemy } from '../game/enemy-ai'
+import type { EnemyShip } from '../game/enemy-ai'
 
 // ─── Reactive UI State ────────────────────────────────────────────────────────
 
@@ -58,17 +50,11 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(true)
 const loadProgress = ref(0)
 const warpFlash = ref(0)
-const showStarMap = ref(false)
 const photoMode = ref(false)
-const showMissionBriefing = ref<Mission | null>(null)
-const missionCompleteMsg = ref('')
-const missionCompleteMsgTimer = ref(0)
-const systemArrivalMsg = ref('')
-const systemArrivalTimer = ref(0)
 
 let prevWarpState = false
 
-// Reactive HUD state — primitive values only, tracked by Vue
+// Reactive HUD state
 const hudState: HudState = reactive({
   heading: 0,
   bearing: 0,
@@ -82,16 +68,29 @@ const hudState: HudState = reactive({
   torpedoCount: 64,
 })
 
-// Reactive universe info for HUD and StarMap
-const currentSystemId = ref('sol')
-const currentSystemName = ref('Sol')
-const destinationId = ref<string | null>(null)
-const destinationName = ref('')
-const travelPhase = ref('idle')
-const activeMissionTitle = ref('')
-const activeMissionObjective = ref('')
-const captainRating = ref('Ensign')
-const availableMissionsAtStation = ref<Mission[]>([])
+// ─── Mission State ────────────────────────────────────────────────────────────
+
+const missionPhase = ref<'free' | 'briefing' | 'active' | 'victory' | 'defeat'>('free')
+const briefingText = ref('')
+const briefingCharIndex = ref(0)
+const showStartButton = ref(true)
+const playerHull = ref(100)
+const enemyHull = ref(100)
+const enemyDistance = ref(0)
+const damageFlash = ref(0)
+const enemyBehavior = ref<string>('idle')
+
+// Briefing text content
+const BRIEFING_FULL_TEXT =
+  `Captain Picard. Starfleet Command has issued an urgent directive. ` +
+  `Long-range sensors have detected the USS Reliant, a Federation Miranda-class vessel ` +
+  `reported missing near the Saturnian system. Telemetry confirms the ship has been ` +
+  `assimilated by the Borg. The Reliant is operating under Borg control beyond Saturn's orbit. ` +
+  `Your orders are clear: proceed to Saturn, intercept the Reliant, and neutralize the threat ` +
+  `before it can reach Earth. The Enterprise is the only ship in range. ` +
+  `Engage at maximum warp. Good luck, Captain. Picard out.`
+
+let briefingTimer = 0
 
 // ─── Non-reactive Game State ──────────────────────────────────────────────────
 
@@ -110,40 +109,60 @@ let audioMgr: AudioManager | null = null
 let audioInitialized = false
 let animFrameId = 0
 let freeCam: FreeCameraState | null = null
+let combatState: CombatState | null = null
+let enemy: EnemyShip | null = null
+const explosions: Explosion[] = []
 
-// New systems
-let universeState: UniverseState | null = null
-let missionState: MissionState | null = null
+// ─── Briefing Voice ──────────────────────────────────────────────────────────
 
-// ─── System Loading ───────────────────────────────────────────────────────────
+let speechUtterance: SpeechSynthesisUtterance | null = null
 
-function loadSystem(systemId: string): void {
-  if (!sceneCtx) return
+function startBriefing(): void {
+  showStartButton.value = false
+  missionPhase.value = 'briefing'
+  briefingText.value = ''
+  briefingCharIndex.value = 0
+  briefingTimer = 0
 
-  const system = getSystem(systemId)
-  if (!system) return
-
-  // Dispose old system objects
-  if (systemObjs) {
-    sceneCtx.scene.remove(systemObjs.root)
-    disposeSystemObjects(systemObjs)
-    systemObjs = null
+  // Start text-to-speech
+  if ('speechSynthesis' in window) {
+    const utter = new SpeechSynthesisUtterance(BRIEFING_FULL_TEXT)
+    utter.rate = 0.95
+    utter.pitch = 0.9
+    utter.volume = 0.8
+    // Try to pick a deep male voice
+    const voices = speechSynthesis.getVoices()
+    const preferred = voices.find(v =>
+      v.name.includes('Daniel') || v.name.includes('Male') ||
+      v.name.includes('James') || v.name.includes('Google UK English Male'),
+    )
+    if (preferred) utter.voice = preferred
+    utter.onend = () => {
+      // Ensure all text is shown
+      briefingText.value = BRIEFING_FULL_TEXT
+      briefingCharIndex.value = BRIEFING_FULL_TEXT.length
+    }
+    speechSynthesis.speak(utter)
+    speechUtterance = utter
   }
+}
 
-  // Create new system objects (planets + star, no NPCs/stations for now)
-  systemObjs = createSystemObjects(system)
-  sceneCtx.scene.add(systemObjs.root)
-
-  // Update reactive info
-  currentSystemId.value = systemId
-  currentSystemName.value = system.name
-
-  // Check available missions
-  if (missionState) {
-    availableMissionsAtStation.value = getAvailableMissions(missionState, systemId)
+function skipBriefing(): void {
+  if (speechSynthesis.speaking) {
+    speechSynthesis.cancel()
   }
+  briefingText.value = BRIEFING_FULL_TEXT
+  briefingCharIndex.value = BRIEFING_FULL_TEXT.length
+}
 
-  console.log(`[Universe] Loaded system: ${system.name} (${system.planets.length} planets, ${system.npcs.length} NPCs)`)
+function startMission(): void {
+  missionPhase.value = 'active'
+
+  // Spawn enemy ship
+  if (sceneCtx && !enemy) {
+    combatState = createCombatState()
+    enemy = createEnemyShip(sceneCtx.scene)
+  }
 }
 
 // ─── Game Loop ────────────────────────────────────────────────────────────────
@@ -152,13 +171,8 @@ function gameLoop(): void {
   animFrameId = requestAnimationFrame(gameLoop)
   if (!sceneCtx || !postProc || !animState || !state || !input || !shipGroup) return
 
-  const delta = Math.min(sceneCtx.clock.getDelta(), 0.05) // cap at 50ms
+  const delta = Math.min(sceneCtx.clock.getDelta(), 0.05)
   const elapsed = sceneCtx.clock.getElapsedTime()
-
-  // Handle star map toggle (M key)
-  if (input.wasJustPressed('KeyM')) {
-    showStarMap.value = !showStarMap.value
-  }
 
   // Toggle photo mode (F key)
   if (input.wasJustPressed('KeyF') && freeCam) {
@@ -176,85 +190,44 @@ function gameLoop(): void {
     resetPhotoCamera(freeCam, sceneCtx.camera)
   }
 
-  // Don't update game while star map is open (pause)
-  if (showStarMap.value) {
-    postProc.composer.render()
-    input.endFrame()
-    return
-  }
-
-  // 1. Update universe travel state
-  if (universeState && state) {
-    travelPhase.value = universeState.travelPhase
-
-    const travelResult = updateTravel(universeState, state, delta)
-
-    if (travelResult === 'started-warp') {
-      // Warp jump started — visual flash
-      warpFlash.value = 1.0
-    }
-
-    if (travelResult === 'arrived') {
-      // Arrived at new system!
-      loadSystem(universeState.currentSystemId)
-      warpFlash.value = 1.0
-      systemArrivalMsg.value = `Arrived at ${universeState.currentSystem.name}`
-      systemArrivalTimer.value = 4.0
-      destinationId.value = null
-      destinationName.value = ''
-
-      // Check mission objectives
-      if (missionState) {
-        const result = checkMissionObjectives(missionState, universeState.currentSystemId)
-        if (result.completed && result.mission) {
-          missionCompleteMsg.value = `Mission Complete: ${result.mission.title}`
-          missionCompleteMsgTimer.value = 5.0
-          // Apply rewards
-          state.torpedoCount = Math.min(64, state.torpedoCount + result.mission.torpedoReward)
-          state.shieldStrength = Math.min(100, state.shieldStrength + result.mission.shieldReward)
-          activeMissionTitle.value = ''
-          activeMissionObjective.value = ''
-        }
-        updateMissionHud()
-        captainRating.value = missionState.rating
-      }
+  // ── Briefing text typewriter ──
+  if (missionPhase.value === 'briefing') {
+    briefingTimer += delta
+    const charsPerSecond = 40
+    const targetIndex = Math.min(
+      Math.floor(briefingTimer * charsPerSecond),
+      BRIEFING_FULL_TEXT.length,
+    )
+    if (targetIndex > briefingCharIndex.value) {
+      briefingCharIndex.value = targetIndex
+      briefingText.value = BRIEFING_FULL_TEXT.slice(0, targetIndex)
     }
   }
 
-  // 1b. Check if E key should trigger inter-system warp (destination set)
-  if (universeState && universeState.destination && universeState.travelPhase === 'idle') {
-    if (input.wasJustPressed('CapsLock')) {
-      if (state.throttle < 0.3) state.throttle = 0.5
-      initiateWarp(universeState, state)
-    }
-  }
-
-  // 2. Update ship from input (skip in photo mode and inter-system warp)
+  // ── Update ship (skip in photo mode) ──
   if (!freeCam?.active) {
-    if (!universeState || universeState.travelPhase === 'idle') {
-      updateShip(state, input, delta)
-    }
+    updateShip(state, input, delta)
   }
 
-  // 3. Apply ship transform to the ship group
+  // Apply ship transform
   shipGroup.position.copy(state.position)
   shipGroup.quaternion.copy(state.quaternion)
 
-  // 4. Update camera — free camera in photo mode, follow camera otherwise
+  // ── Camera ──
   if (freeCam?.active) {
     updateFreeCamera(freeCam, sceneCtx.camera, input, delta)
   } else {
     updateCamera(sceneCtx.camera, state, delta)
   }
 
-  // 5. Keep starfield + skybox centered on camera (infinitely far objects)
+  // ── Starfield + Skybox ──
   if (starfield) {
     starfield.position.copy(sceneCtx.camera.position)
     updateStarfieldSpeed(starfield, state.speed)
   }
   if (skybox) updateSkybox(skybox, sceneCtx.camera.position, elapsed)
 
-  // 5b. Rotate planets
+  // ── Rotate planets ──
   if (systemObjs) {
     for (const group of systemObjs.planets) {
       const planet = group.children[0]
@@ -262,7 +235,6 @@ function gameLoop(): void {
         planet.rotation.y += planet.userData.rotSpeed as number
       }
     }
-    // Update star shader time
     if (systemObjs.star?.userData.isStar) {
       const starMat = systemObjs.star.material as THREE.ShaderMaterial
       if (starMat.uniforms?.uTime) {
@@ -271,26 +243,123 @@ function gameLoop(): void {
     }
   }
 
-  // 5c. NPC ships disabled until proper models are available
-
-  // 6. Update audio BEFORE weapons
+  // ── Audio ──
   if (audioMgr) updateAudio(audioMgr, state)
 
-  // 6b. Update weapons and shields
+  // ── Weapons & Shields ──
   if (weaponState) updateWeapons(weaponState, state, sceneCtx.scene, shipGroup, delta)
   if (shieldState) updateShields(shieldState, state, elapsed, delta)
 
-  // 7. Update derived display state and sync to reactive HUD
+  // ── Enemy AI & Combat (only during active mission) ──
+  if (missionPhase.value === 'active' && enemy && combatState && state) {
+    // Sync player shields
+    syncPlayerShields(combatState, state)
+
+    // Update enemy AI
+    updateEnemyAI(enemy, state, combatState, sceneCtx.scene, delta)
+
+    // Check player weapons hitting enemy
+    const phaserHit = checkPhaserHits(combatState, state, enemy.position, delta)
+
+    // Phaser hit sparks (throttled — ~2 per second)
+    if (phaserHit && Math.random() < delta * 2) {
+      const sparkPos = enemy.position.clone().add(
+        new THREE.Vector3((Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4),
+      )
+      const exp = createExplosion(sparkPos, 'phaser')
+      sceneCtx.scene.add(exp.group)
+      explosions.push(exp)
+    }
+
+    // Check torpedo hits
+    if (weaponState && weaponState.torpedoes.length > 0) {
+      const torpPositions = weaponState.torpedoes.map(t => t.mesh.position.clone())
+      const hits = checkTorpedoHits(combatState, torpPositions, enemy.position)
+      // Remove hit torpedoes and spawn explosions (reverse order)
+      for (let i = hits.length - 1; i >= 0; i--) {
+        const idx = hits[i]
+        const torp = weaponState.torpedoes[idx]
+        // Spawn torpedo explosion at impact point
+        const exp = createExplosion(torp.mesh.position.clone(), 'torpedo')
+        sceneCtx.scene.add(exp.group)
+        explosions.push(exp)
+        // Remove torpedo
+        sceneCtx.scene.remove(torp.mesh)
+        torp.mesh.traverse(child => {
+          if (child instanceof THREE.Mesh || child instanceof THREE.Points) {
+            child.geometry.dispose()
+            if (Array.isArray(child.material)) {
+              child.material.forEach(m => m.dispose())
+            } else {
+              child.material.dispose()
+            }
+          }
+        })
+        weaponState.torpedoes.splice(idx, 1)
+      }
+    }
+
+    // Spawn explosion when enemy fires torpedo at player
+    if (enemy.torpedoJustFired) {
+      const playerHitPos = state.position.clone().add(
+        new THREE.Vector3((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3),
+      )
+      const exp = createExplosion(playerHitPos, 'torpedo')
+      sceneCtx.scene.add(exp.group)
+      explosions.push(exp)
+    }
+
+    // Update combat timers
+    updateCombatTimers(combatState, delta)
+
+    // Sync to reactive state
+    playerHull.value = Math.round(combatState.playerHealth.hull)
+    enemyHull.value = Math.round(combatState.enemyHealth.hull)
+    enemyDistance.value = Math.round(enemy.position.distanceTo(state.position))
+    enemyBehavior.value = enemy.behavior
+
+    // Damage flash on player
+    if (combatState.playerHealth.damageFlash > 0) {
+      damageFlash.value = combatState.playerHealth.damageFlash
+    } else {
+      damageFlash.value = Math.max(0, damageFlash.value - 3 * delta)
+    }
+
+    // Sync player hull back into game state shield strength
+    state.shieldStrength = combatState.playerHealth.shieldStrength
+    if (combatState.playerHealth.shieldStrength <= 0) {
+      state.shieldsActive = false
+    }
+
+    // Game over check
+    if (combatState.gameOver === 'victory' && missionPhase.value === 'active') {
+      missionPhase.value = 'victory'
+    } else if (combatState.gameOver === 'defeat' && missionPhase.value === 'active') {
+      missionPhase.value = 'defeat'
+    }
+  }
+
+  // ── Update explosions ──
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    const exp = explosions[i]
+    updateExplosion(exp, delta)
+    if (exp.age >= exp.maxAge) {
+      disposeExplosion(exp, sceneCtx.scene)
+      explosions.splice(i, 1)
+    }
+  }
+
+  // ── Derived state + HUD ──
   updateDerivedState(state)
   syncHudState(hudState, state)
 
-  // 8. Update visual animations
+  // ── Visual animations ──
   animState.speed = state.speed
   animState.isWarp = state.isWarp
   animState.postProcessing = postProc
   updateAnimations(animState, elapsed, sceneCtx.camera)
 
-  // 8b. Warp post-processing effects
+  // ── Warp post-processing ──
   if (postProc.warpEffect) {
     if (state.isWarp !== prevWarpState) {
       warpFlash.value = 1.0
@@ -302,66 +371,11 @@ function gameLoop(): void {
     updateWarpEffect(postProc.warpEffect, state.isWarp, state.speed, elapsed, delta)
   }
 
-  // 8c. Decay notification timers
-  if (missionCompleteMsgTimer.value > 0) {
-    missionCompleteMsgTimer.value -= delta
-    if (missionCompleteMsgTimer.value <= 0) missionCompleteMsg.value = ''
-  }
-  if (systemArrivalTimer.value > 0) {
-    systemArrivalTimer.value -= delta
-    if (systemArrivalTimer.value <= 0) systemArrivalMsg.value = ''
-  }
-
-  // 9. Render
+  // ── Render ──
   postProc.composer.render()
 
-  // 10. End-of-frame input cleanup
+  // ── End frame ──
   input.endFrame()
-}
-
-function updateMissionHud(): void {
-  if (!missionState) return
-  const mission = getActiveMission(missionState)
-  if (mission) {
-    activeMissionTitle.value = mission.title
-    const nextObj = getNextObjective(missionState)
-    activeMissionObjective.value = nextObj?.description ?? 'All objectives complete'
-  } else {
-    activeMissionTitle.value = ''
-    activeMissionObjective.value = ''
-  }
-}
-
-// ─── Star Map Events ──────────────────────────────────────────────────────────
-
-function onSelectSystem(systemId: string): void {
-  if (!universeState) return
-  if (setDestination(universeState, systemId)) {
-    const system = getSystem(systemId)
-    destinationId.value = systemId
-    destinationName.value = system?.name ?? ''
-  }
-}
-
-function onEngageWarp(): void {
-  if (!universeState || !state) return
-  // Set throttle if needed
-  if (state.throttle < 0.3) state.throttle = 0.5
-  if (initiateWarp(universeState, state)) {
-    showStarMap.value = false
-  }
-}
-
-function onCloseStarMap(): void {
-  showStarMap.value = false
-}
-
-function onAcceptMission(mission: Mission): void {
-  if (!missionState) return
-  if (acceptMission(missionState, mission.id)) {
-    showMissionBriefing.value = null
-    updateMissionHud()
-  }
 }
 
 // ─── Window Resize ────────────────────────────────────────────────────────────
@@ -377,6 +391,40 @@ function onWindowResize(): void {
   )
 }
 
+// ─── Restart Game ─────────────────────────────────────────────────────────────
+
+function restartGame(): void {
+  // Clean up enemy
+  if (enemy && sceneCtx) {
+    disposeEnemy(enemy, sceneCtx.scene)
+    enemy = null
+  }
+  combatState = null
+
+  // Reset game state
+  if (state) {
+    state.position.set(0, 0, 0)
+    state.quaternion.identity()
+    state.velocity.set(0, 0, 0)
+    state.throttle = 0
+    state.speed = 0
+    state.isWarp = false
+    state.shieldsActive = false
+    state.shieldStrength = 100
+    state.phaserCharge = 100
+    state.torpedoCount = 64
+    state.phaserFiring = false
+    state.torpedoFiring = false
+  }
+
+  // Reset UI
+  missionPhase.value = 'free'
+  showStartButton.value = true
+  playerHull.value = 100
+  enemyHull.value = 100
+  damageFlash.value = 0
+}
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -389,11 +437,11 @@ onMounted(async () => {
   const envMap = createSpaceEnvironment(sceneCtx.renderer)
   sceneCtx.scene.environment = envMap
 
-  // Starfield (particle layer — follows camera)
+  // Starfield
   starfield = createStarfield(15000)
   sceneCtx.scene.add(starfield)
 
-  // Nebula skybox (shader sphere — follows camera)
+  // Nebula skybox
   skybox = createNebulaSkybox()
   sceneCtx.scene.add(skybox.nebulaSphere)
 
@@ -407,7 +455,7 @@ onMounted(async () => {
     starfield,
   }
 
-  // Game state + input + weapons
+  // Game state
   state = createGameState()
   input = new InputManager()
   input.attach()
@@ -415,13 +463,15 @@ onMounted(async () => {
   shieldState = createShieldSystem()
   audioMgr = createAudioManager()
 
-  // Initialize new systems
+  // Free camera
   freeCam = createFreeCameraState()
-  universeState = createUniverseState()
-  missionState = createMissionState()
 
-  // Load starting system (Sol)
-  loadSystem('sol')
+  // Load Sol system (our playground)
+  const solSystem = getSystem('sol')
+  if (solSystem) {
+    systemObjs = createSystemObjects(solSystem)
+    sceneCtx.scene.add(systemObjs.root)
+  }
 
   // Init audio on first user interaction
   const initAudioOnce = () => {
@@ -439,7 +489,7 @@ onMounted(async () => {
   shipGroup = new THREE.Group()
   sceneCtx.scene.add(shipGroup)
 
-  // Add shield mesh to ship group
+  // Shield mesh
   if (shieldState) shipGroup.add(shieldState.mesh)
 
   // Reparent ship-local point lights
@@ -453,7 +503,7 @@ onMounted(async () => {
     shipGroup.add(light)
   }
 
-  // Start game loop immediately
+  // Start game loop
   gameLoop()
 
   // Load Enterprise model
@@ -475,11 +525,14 @@ onMounted(async () => {
 
   window.addEventListener('resize', onWindowResize)
 
-  // Mouse events for free camera mode
+  // Mouse events for free camera
   const canvas = canvasRef.value!
   canvas.addEventListener('mousedown', (e) => { if (freeCam) onFreeCameraMouseDown(freeCam, e) })
   canvas.addEventListener('mousemove', (e) => { if (freeCam) onFreeCameraMouseMove(freeCam, e) })
   canvas.addEventListener('mouseup', () => { if (freeCam) onFreeCameraMouseUp(freeCam) })
+
+  // Preload voices for speech synthesis
+  speechSynthesis.getVoices()
 })
 
 onUnmounted(() => {
@@ -489,6 +542,12 @@ onUnmounted(() => {
   if (weaponState && sceneCtx) disposeWeapons(weaponState, sceneCtx.scene)
   if (audioMgr) disposeAudio(audioMgr)
   if (systemObjs) disposeSystemObjects(systemObjs)
+  if (enemy && sceneCtx) disposeEnemy(enemy, sceneCtx.scene)
+  if (sceneCtx) {
+    for (const exp of explosions) disposeExplosion(exp, sceneCtx.scene)
+    explosions.length = 0
+  }
+  if (speechSynthesis.speaking) speechSynthesis.cancel()
   if (sceneCtx) {
     sceneCtx.renderer.dispose()
   }
@@ -520,6 +579,13 @@ onUnmounted(() => {
       :style="{ opacity: warpFlash }"
     />
 
+    <!-- Damage flash overlay (red) -->
+    <div
+      v-if="damageFlash > 0.01"
+      class="damage-flash"
+      :style="{ opacity: damageFlash * 0.4 }"
+    />
+
     <!-- Photo mode indicator -->
     <div v-if="photoMode" class="photo-mode-indicator">
       <div class="photo-label">PHOTO MODE</div>
@@ -528,95 +594,108 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- System arrival notification -->
-    <Transition name="slide-down">
-      <div v-if="systemArrivalMsg" class="system-arrival">
-        <div class="arrival-label">SYSTEM ENTERED</div>
-        <div class="arrival-name">{{ systemArrivalMsg }}</div>
+    <!-- Start Mission button (free exploration phase) -->
+    <Transition name="fade-fast">
+      <div v-if="showStartButton && !isLoading" class="start-mission-container">
+        <div class="start-mission-subtitle">USS Enterprise NCC-1701-D</div>
+        <div class="start-mission-hint">Explore freely or begin your mission</div>
+        <button class="start-mission-btn" @click="startBriefing">
+          START MISSION
+        </button>
       </div>
     </Transition>
 
-    <!-- Mission complete notification -->
-    <Transition name="slide-down">
-      <div v-if="missionCompleteMsg" class="mission-complete">
-        <div class="complete-icon">★</div>
-        <div class="complete-text">{{ missionCompleteMsg }}</div>
+    <!-- Mission Briefing overlay -->
+    <Transition name="fade-fast">
+      <div v-if="missionPhase === 'briefing'" class="briefing-overlay">
+        <div class="briefing-panel">
+          <div class="briefing-header">
+            <div class="briefing-starfleet">STARFLEET COMMAND</div>
+            <div class="briefing-priority">PRIORITY ONE</div>
+          </div>
+          <div class="briefing-text">{{ briefingText }}<span class="briefing-cursor">|</span></div>
+          <div class="briefing-actions" v-if="briefingCharIndex >= BRIEFING_FULL_TEXT.length">
+            <button class="lcars-btn engage" @click="startMission">ENGAGE</button>
+          </div>
+          <div class="briefing-actions" v-else>
+            <button class="lcars-btn skip" @click="skipBriefing">SKIP</button>
+          </div>
+        </div>
       </div>
     </Transition>
 
-    <!-- Star Map overlay -->
+    <!-- Combat HUD (during active mission) -->
+    <div v-if="missionPhase === 'active'" class="combat-hud">
+      <!-- Player hull -->
+      <div class="hull-bar player-hull">
+        <div class="hull-label">ENTERPRISE HULL</div>
+        <div class="hull-track">
+          <div
+            class="hull-fill"
+            :class="{ critical: playerHull < 30 }"
+            :style="{ width: playerHull + '%' }"
+          />
+        </div>
+        <div class="hull-value">{{ playerHull }}%</div>
+      </div>
+
+      <!-- Enemy hull -->
+      <div class="hull-bar enemy-hull">
+        <div class="hull-label">USS RELIANT (BORG)</div>
+        <div class="hull-track">
+          <div
+            class="hull-fill enemy"
+            :class="{ critical: enemyHull < 30 }"
+            :style="{ width: enemyHull + '%' }"
+          />
+        </div>
+        <div class="hull-value">{{ enemyHull }}%</div>
+      </div>
+
+      <!-- Enemy info -->
+      <div class="enemy-info">
+        <span class="enemy-dist">RANGE: {{ enemyDistance }}m</span>
+        <span class="enemy-status" :class="enemyBehavior">{{ enemyBehavior.toUpperCase() }}</span>
+      </div>
+    </div>
+
+    <!-- Victory screen -->
     <Transition name="fade-fast">
-      <StarMap
-        v-if="showStarMap"
-        :currentSystemId="currentSystemId"
-        :destinationId="destinationId"
-        :travelPhase="travelPhase"
-        @selectSystem="onSelectSystem"
-        @engage="onEngageWarp"
-        @close="onCloseStarMap"
-      />
+      <div v-if="missionPhase === 'victory'" class="endgame-overlay victory">
+        <div class="endgame-panel">
+          <div class="endgame-icon">&#9733;</div>
+          <div class="endgame-title">VICTORY</div>
+          <div class="endgame-subtitle">The Borg threat has been neutralized.</div>
+          <div class="endgame-text">
+            The USS Reliant has been destroyed. The Sol system is safe.
+            Starfleet Command sends their congratulations, Captain.
+          </div>
+          <div class="endgame-stats">
+            <div>Enterprise Hull Remaining: {{ playerHull }}%</div>
+          </div>
+          <button class="lcars-btn engage" @click="restartGame">RETURN TO BRIDGE</button>
+        </div>
+      </div>
     </Transition>
 
-    <!-- Mission briefing modal -->
+    <!-- Defeat screen -->
     <Transition name="fade-fast">
-      <div v-if="showMissionBriefing" class="mission-modal-overlay" @click.self="showMissionBriefing = null">
-        <div class="mission-modal">
-          <div class="modal-header">MISSION BRIEFING</div>
-          <div class="modal-title">{{ showMissionBriefing.title }}</div>
-          <div class="modal-briefing">{{ showMissionBriefing.briefing }}</div>
-          <div class="modal-objectives">
-            <div class="modal-obj-header">OBJECTIVES:</div>
-            <div v-for="(obj, i) in showMissionBriefing.objectives" :key="i" class="modal-obj">
-              {{ i + 1 }}. {{ obj.description }}
-            </div>
+      <div v-if="missionPhase === 'defeat'" class="endgame-overlay defeat">
+        <div class="endgame-panel">
+          <div class="endgame-icon">&#9760;</div>
+          <div class="endgame-title">SHIP DESTROYED</div>
+          <div class="endgame-subtitle">The Enterprise has been lost.</div>
+          <div class="endgame-text">
+            The Borg-controlled Reliant has overwhelmed the Enterprise.
+            All hands lost. The Federation mourns this day.
           </div>
-          <div class="modal-reward">REWARD: {{ showMissionBriefing.reward }}</div>
-          <div class="modal-actions">
-            <button class="lcars-btn accept" @click="onAcceptMission(showMissionBriefing!)">ACCEPT MISSION</button>
-            <button class="lcars-btn decline" @click="showMissionBriefing = null">DECLINE</button>
-          </div>
+          <button class="lcars-btn engage" @click="restartGame">TRY AGAIN</button>
         </div>
       </div>
     </Transition>
 
     <!-- HUD overlay -->
     <HudOverlay :state="hudState" />
-
-    <!-- System / Mission info bar -->
-    <div class="info-bar">
-      <div class="info-bar-left">
-        <span class="info-system">📍 {{ currentSystemName }}</span>
-        <span v-if="destinationName" class="info-dest">→ {{ destinationName }}</span>
-        <span v-if="travelPhase !== 'idle'" class="info-travel">{{ travelPhase.toUpperCase() }}</span>
-      </div>
-      <div class="info-bar-center">
-        <span v-if="activeMissionTitle" class="info-mission">
-          MISSION: {{ activeMissionTitle }}
-          <span class="info-obj">| {{ activeMissionObjective }}</span>
-        </span>
-      </div>
-      <div class="info-bar-right">
-        <span class="info-rating">{{ captainRating }}</span>
-        <span class="info-map-hint">M: Star Map</span>
-      </div>
-    </div>
-
-    <!-- Available missions indicator -->
-    <div
-      v-if="availableMissionsAtStation.length > 0 && !activeMissionTitle"
-      class="missions-available"
-    >
-      <div class="missions-header">MISSIONS AVAILABLE</div>
-      <div
-        v-for="mission in availableMissionsAtStation"
-        :key="mission.id"
-        class="mission-item"
-        @click="showMissionBriefing = mission"
-      >
-        <span class="mission-type">{{ mission.type.toUpperCase() }}</span>
-        <span class="mission-name">{{ mission.title }}</span>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -711,22 +790,7 @@ onUnmounted(() => {
   opacity: 0;
 }
 
-.slide-down-enter-active {
-  transition: all 0.4s ease;
-}
-.slide-down-leave-active {
-  transition: all 0.6s ease;
-}
-.slide-down-enter-from {
-  opacity: 0;
-  transform: translateY(-20px);
-}
-.slide-down-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-
-/* Warp engage/disengage flash */
+/* Warp flash */
 .warp-flash {
   position: absolute;
   top: 0;
@@ -744,280 +808,24 @@ onUnmounted(() => {
   );
 }
 
-/* System arrival notification */
-.system-arrival {
+/* Damage flash */
+.damage-flash {
   position: absolute;
-  top: 80px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-  pointer-events: none;
-  z-index: 8;
-}
-
-.arrival-label {
-  font-family: 'Segoe UI', sans-serif;
-  font-size: 0.6rem;
-  letter-spacing: 0.3rem;
-  color: #cc7700;
-}
-
-.arrival-name {
-  font-family: 'Segoe UI', sans-serif;
-  font-size: 1.5rem;
-  font-weight: 300;
-  letter-spacing: 0.4rem;
-  color: #ddeeff;
-  text-shadow: 0 0 20px rgba(100, 160, 255, 0.5);
-}
-
-/* Mission complete notification */
-.mission-complete {
-  position: absolute;
-  top: 120px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
-  pointer-events: none;
-  z-index: 8;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.complete-icon {
-  font-size: 1.5rem;
-  color: #ffcc00;
-}
-
-.complete-text {
-  font-family: 'Segoe UI', sans-serif;
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: 0.2rem;
-  color: #ffcc00;
-  text-shadow: 0 0 10px rgba(255, 200, 0, 0.5);
-}
-
-/* Info bar at the top */
-.info-bar {
-  position: absolute;
-  top: 40px;
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 20px;
-  pointer-events: none;
-  z-index: 6;
-  font-family: 'Segoe UI', sans-serif;
-  font-size: 0.65rem;
-  letter-spacing: 0.1rem;
-}
-
-.info-bar-left,
-.info-bar-center,
-.info-bar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.info-system {
-  color: #cc7700;
-  font-weight: 600;
-}
-
-.info-dest {
-  color: #55aaff;
-}
-
-.info-travel {
-  color: #ff6644;
-  animation: blink 1s ease infinite;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.info-mission {
-  color: #88ccaa;
-}
-
-.info-obj {
-  color: #668877;
-}
-
-.info-rating {
-  color: #cc7700;
-  font-weight: 600;
-  letter-spacing: 0.15rem;
-}
-
-.info-map-hint {
-  color: #445566;
-}
-
-/* Available missions panel */
-.missions-available {
-  position: absolute;
-  top: 120px;
-  right: 20px;
-  background: rgba(0, 10, 20, 0.85);
-  border: 1px solid #cc770040;
-  border-radius: 8px;
-  padding: 12px 16px;
-  z-index: 7;
-  font-family: 'Segoe UI', sans-serif;
-  max-width: 280px;
-}
-
-.missions-header {
-  font-size: 0.6rem;
-  letter-spacing: 0.2rem;
-  color: #cc7700;
-  margin-bottom: 8px;
-  font-weight: 700;
-}
-
-.mission-item {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 6px 8px;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.mission-item:hover {
-  background: rgba(204, 119, 0, 0.15);
-}
-
-.mission-type {
-  font-size: 0.5rem;
-  letter-spacing: 0.1rem;
-  color: #667788;
-  background: rgba(100, 120, 140, 0.2);
-  padding: 2px 6px;
-  border-radius: 3px;
-}
-
-.mission-name {
-  font-size: 0.7rem;
-  color: #aabbcc;
-}
-
-/* Mission briefing modal */
-.mission-modal-overlay {
-  position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 10, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 25;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 50, 20, 0.8) 0%,
+    rgba(200, 30, 10, 0.4) 40%,
+    transparent 80%
+  );
 }
 
-.mission-modal {
-  background: rgba(8, 15, 25, 0.98);
-  border: 1px solid #cc770050;
-  border-radius: 12px;
-  padding: 30px;
-  max-width: 500px;
-  width: 90%;
-  font-family: 'Segoe UI', sans-serif;
-}
-
-.modal-header {
-  font-size: 0.6rem;
-  letter-spacing: 0.3rem;
-  color: #cc7700;
-  margin-bottom: 8px;
-}
-
-.modal-title {
-  font-size: 1.3rem;
-  font-weight: 600;
-  color: #ddeeff;
-  margin-bottom: 16px;
-}
-
-.modal-briefing {
-  font-size: 0.8rem;
-  color: #8899aa;
-  line-height: 1.6;
-  margin-bottom: 16px;
-  font-style: italic;
-}
-
-.modal-objectives {
-  margin-bottom: 16px;
-}
-
-.modal-obj-header {
-  font-size: 0.6rem;
-  letter-spacing: 0.2rem;
-  color: #667788;
-  margin-bottom: 6px;
-}
-
-.modal-obj {
-  font-size: 0.75rem;
-  color: #aabbcc;
-  padding: 3px 0 3px 10px;
-  border-left: 2px solid #cc770040;
-}
-
-.modal-reward {
-  font-size: 0.7rem;
-  color: #55cc88;
-  letter-spacing: 0.1rem;
-  margin-bottom: 20px;
-}
-
-.modal-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.lcars-btn {
-  border: none;
-  padding: 10px 24px;
-  border-radius: 16px;
-  font-family: inherit;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.2rem;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.lcars-btn.accept {
-  background: #cc7700;
-  color: #000;
-}
-
-.lcars-btn.accept:hover {
-  background: #ff9900;
-}
-
-.lcars-btn.decline {
-  background: #334455;
-  color: #8899aa;
-}
-
-.lcars-btn.decline:hover {
-  background: #445566;
-}
-
-/* Photo mode indicator */
+/* Photo mode */
 .photo-mode-indicator {
   position: absolute;
   top: 10px;
@@ -1046,5 +854,353 @@ onUnmounted(() => {
   letter-spacing: 0.1rem;
   color: #8899aa;
   margin-top: 4px;
+}
+
+/* ─── Start Mission Button ───────────────────────────────────────────────── */
+
+.start-mission-container {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  z-index: 8;
+}
+
+.start-mission-subtitle {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.4rem;
+  color: #6688aa;
+  margin-bottom: 4px;
+}
+
+.start-mission-hint {
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.55rem;
+  letter-spacing: 0.15rem;
+  color: #445566;
+  margin-bottom: 16px;
+}
+
+.start-mission-btn {
+  background: linear-gradient(135deg, #cc7700, #ff9900);
+  color: #000;
+  border: none;
+  padding: 14px 48px;
+  border-radius: 24px;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.3rem;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 0 30px rgba(204, 119, 0, 0.3);
+}
+
+.start-mission-btn:hover {
+  background: linear-gradient(135deg, #ff9900, #ffbb33);
+  box-shadow: 0 0 50px rgba(255, 153, 0, 0.5);
+  transform: scale(1.05);
+}
+
+/* ─── Mission Briefing ───────────────────────────────────────────────────── */
+
+.briefing-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 10, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.briefing-panel {
+  background: rgba(5, 10, 20, 0.98);
+  border: 1px solid #cc770040;
+  border-left: 4px solid #cc7700;
+  border-radius: 4px;
+  padding: 40px;
+  max-width: 650px;
+  width: 90%;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.briefing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.briefing-starfleet {
+  font-size: 0.6rem;
+  letter-spacing: 0.4rem;
+  color: #cc7700;
+  font-weight: 700;
+}
+
+.briefing-priority {
+  font-size: 0.55rem;
+  letter-spacing: 0.2rem;
+  color: #ff4444;
+  animation: blink 1s ease infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.briefing-text {
+  font-size: 0.85rem;
+  color: #aabbcc;
+  line-height: 1.8;
+  min-height: 150px;
+}
+
+.briefing-cursor {
+  color: #cc7700;
+  animation: blink 0.6s ease infinite;
+}
+
+.briefing-actions {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.lcars-btn {
+  border: none;
+  padding: 12px 32px;
+  border-radius: 20px;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.25rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.lcars-btn.engage {
+  background: #cc7700;
+  color: #000;
+}
+
+.lcars-btn.engage:hover {
+  background: #ff9900;
+}
+
+.lcars-btn.skip {
+  background: #334455;
+  color: #8899aa;
+}
+
+.lcars-btn.skip:hover {
+  background: #445566;
+}
+
+/* ─── Combat HUD ─────────────────────────────────────────────────────────── */
+
+.combat-hud {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  padding: 0 20px;
+  pointer-events: none;
+  z-index: 7;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+.hull-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.hull-bar.player-hull {
+  justify-content: flex-start;
+}
+
+.hull-bar.enemy-hull {
+  justify-content: flex-start;
+}
+
+.hull-label {
+  font-size: 0.55rem;
+  letter-spacing: 0.15rem;
+  color: #8899aa;
+  min-width: 140px;
+  text-align: right;
+}
+
+.hull-track {
+  width: 200px;
+  height: 6px;
+  background: rgba(100, 120, 140, 0.2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hull-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3388ff, #55ccff);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.hull-fill.enemy {
+  background: linear-gradient(90deg, #00cc44, #44ff88);
+}
+
+.hull-fill.critical {
+  background: linear-gradient(90deg, #ff3322, #ff6644);
+  animation: pulse-critical 0.5s ease infinite;
+}
+
+@keyframes pulse-critical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.hull-value {
+  font-size: 0.6rem;
+  color: #aabbcc;
+  font-weight: 600;
+  min-width: 35px;
+}
+
+.enemy-info {
+  margin-left: 150px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.enemy-dist {
+  font-size: 0.5rem;
+  letter-spacing: 0.1rem;
+  color: #667788;
+}
+
+.enemy-status {
+  font-size: 0.5rem;
+  letter-spacing: 0.15rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.enemy-status.idle {
+  color: #88aa88;
+  background: rgba(100, 150, 100, 0.15);
+}
+
+.enemy-status.alert {
+  color: #ffaa00;
+  background: rgba(255, 170, 0, 0.15);
+  animation: blink 1s ease infinite;
+}
+
+.enemy-status.attack {
+  color: #ff4444;
+  background: rgba(255, 60, 40, 0.2);
+}
+
+.enemy-status.evasive {
+  color: #ff8844;
+  background: rgba(255, 130, 60, 0.15);
+}
+
+/* ─── End Game Screens ───────────────────────────────────────────────────── */
+
+.endgame-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 25;
+}
+
+.endgame-overlay.victory {
+  background: rgba(0, 10, 5, 0.85);
+}
+
+.endgame-overlay.defeat {
+  background: rgba(15, 0, 0, 0.85);
+}
+
+.endgame-panel {
+  text-align: center;
+  font-family: 'Segoe UI', sans-serif;
+  max-width: 500px;
+  width: 90%;
+}
+
+.endgame-icon {
+  font-size: 4rem;
+  margin-bottom: 16px;
+}
+
+.victory .endgame-icon {
+  color: #ffcc00;
+  text-shadow: 0 0 40px rgba(255, 200, 0, 0.5);
+}
+
+.defeat .endgame-icon {
+  color: #ff3322;
+  text-shadow: 0 0 40px rgba(255, 50, 30, 0.5);
+}
+
+.endgame-title {
+  font-size: 2.2rem;
+  font-weight: 300;
+  letter-spacing: 0.6rem;
+  margin-bottom: 8px;
+}
+
+.victory .endgame-title {
+  color: #ddeeff;
+}
+
+.defeat .endgame-title {
+  color: #ff8877;
+}
+
+.endgame-subtitle {
+  font-size: 0.8rem;
+  letter-spacing: 0.2rem;
+  color: #8899aa;
+  margin-bottom: 20px;
+}
+
+.endgame-text {
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: #778899;
+  margin-bottom: 24px;
+}
+
+.endgame-stats {
+  font-size: 0.7rem;
+  color: #aabbcc;
+  margin-bottom: 24px;
+  letter-spacing: 0.1rem;
+}
+
+.endgame-panel .lcars-btn {
+  margin-top: 8px;
 }
 </style>

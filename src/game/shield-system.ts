@@ -66,28 +66,28 @@ export function createShieldSystem(): ShieldSystemState {
       }
 
       void main() {
-        // Fresnel effect — edges glow more than face-on surfaces
+        // Strong fresnel — only edges visible, center nearly invisible
         float fresnel = 1.0 - abs(dot(vNormal, vec3(0.0, 0.0, 1.0)));
-        fresnel = pow(fresnel, 2.0);
+        fresnel = pow(fresnel, 4.0);
 
-        // Animated hex grid
+        // Animated hex grid — very faint
         vec2 hexCoord = vPosition.xy * 1.5 + vec2(vPosition.z * 0.3);
         float hex = hexGrid(hexCoord + uTime * 0.1);
 
-        // Combine
-        float alpha = uOpacity * (fresnel * 0.6 + hex * 0.15 + 0.05);
+        // Only show hex lines at edges
+        float alpha = uOpacity * (fresnel * 0.5 + hex * fresnel * 0.1);
 
         // Strength-based color shift (weaker = more red)
         vec3 color = mix(vec3(1.0, 0.3, 0.2), uColor, uStrength);
 
-        // Pulse effect on toggle
-        alpha += uPulse * 0.4;
+        // Pulse effect on toggle (brief flash)
+        alpha += uPulse * fresnel * 0.3;
 
-        // Energy flow animation
-        float flow = sin(vPosition.y * 4.0 + uTime * 2.0) * 0.05 + 0.05;
-        alpha += flow * uOpacity;
+        // Very subtle energy flow at edges only
+        float flow = sin(vPosition.y * 4.0 + uTime * 2.0) * 0.02;
+        alpha += flow * uOpacity * fresnel;
 
-        gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.6));
+        gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.25));
       }
     `,
     transparent: true,
@@ -132,7 +132,7 @@ export function updateShields(
   }
 
   // Animate opacity (smooth on/off)
-  const targetOpacity = shield.active ? 0.5 : 0
+  const targetOpacity = shield.active ? 0.3 : 0
   const currentOpacity = mat.uniforms.uOpacity!.value as number
   mat.uniforms.uOpacity!.value = currentOpacity + (targetOpacity - currentOpacity) * Math.min(1, delta * 5)
 
