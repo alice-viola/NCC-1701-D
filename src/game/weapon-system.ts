@@ -37,6 +37,7 @@ const _direction = new THREE.Vector3()
 
 /**
  * Updates weapon state each frame — fires, ages, and removes projectiles.
+ * @param enemyPosition Optional enemy position — when provided, phasers and torpedoes auto-aim at it.
  */
 export function updateWeapons(
   ws: WeaponSystemState,
@@ -44,6 +45,7 @@ export function updateWeapons(
   scene: THREE.Scene,
   shipGroup: THREE.Group,
   delta: number,
+  enemyPosition?: THREE.Vector3,
 ): void {
   // --- Phaser beams ---
   ws.phaserCooldown = Math.max(0, ws.phaserCooldown - delta)
@@ -51,7 +53,13 @@ export function updateWeapons(
   if (gameState.phaserFiring && gameState.phaserCharge > 5 && ws.phaserCooldown <= 0) {
     // Compute world-space phaser origin
     _origin.copy(PHASER_ORIGIN_OFFSET).applyQuaternion(gameState.quaternion).add(gameState.position)
-    _direction.set(0, 0, -1).applyQuaternion(gameState.quaternion)
+
+    // Auto-aim at enemy if available and within range (200 units)
+    if (enemyPosition && _origin.distanceTo(enemyPosition) < 200) {
+      _direction.subVectors(enemyPosition, _origin).normalize()
+    } else {
+      _direction.set(0, 0, -1).applyQuaternion(gameState.quaternion)
+    }
 
     const beam = createPhaserBeamMesh(_origin, _direction)
     scene.add(beam.mesh)
@@ -106,9 +114,19 @@ export function updateWeapons(
   // --- Photon torpedoes ---
   if (gameState.torpedoFiring && gameState.torpedoCount > 0) {
     _origin.copy(TORPEDO_ORIGIN_OFFSET).applyQuaternion(gameState.quaternion).add(gameState.position)
-    _direction.set(0, 0, -1).applyQuaternion(gameState.quaternion)
+
+    // Auto-aim at enemy if available
+    if (enemyPosition) {
+      _direction.subVectors(enemyPosition, _origin).normalize()
+    } else {
+      _direction.set(0, 0, -1).applyQuaternion(gameState.quaternion)
+    }
 
     const torpedo = createTorpedoMesh(_origin, _direction)
+    // Set homing target so torpedo tracks the enemy
+    if (enemyPosition) {
+      torpedo.targetPosition = enemyPosition
+    }
     scene.add(torpedo.mesh)
     ws.torpedoes.push(torpedo)
     gameState.torpedoCount--

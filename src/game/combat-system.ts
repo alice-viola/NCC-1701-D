@@ -84,6 +84,9 @@ export function applyDamage(health: ShipHealth, rawDamage: number): void {
 /**
  * Check if the player's phaser beams hit the enemy ship.
  * Called every frame — applies DPS-based damage.
+ *
+ * With auto-aim enabled, phasers lock onto the enemy within a wide frontal arc
+ * (roughly 240° — anything not directly behind the ship).
  */
 export function checkPhaserHits(
   combat: CombatState,
@@ -93,21 +96,20 @@ export function checkPhaserHits(
 ): boolean {
   if (!playerState.phaserFiring || combat.enemyHealth.isDestroyed) return false
 
-  // Check if enemy is roughly in front of the player and within range
+  // Check range
   const toEnemy = new THREE.Vector3().subVectors(enemyPosition, playerState.position)
   const dist = toEnemy.length()
 
   if (dist > 200) return false // too far
 
-  // Check if phaser beam direction (ship forward) roughly points at enemy
+  // With auto-aim, phasers can hit if the enemy is not directly behind the ship
+  // (allow a wide ~240° arc — only blocked if enemy is in the rear 120° cone)
   const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(playerState.quaternion)
   toEnemy.normalize()
   const dot = forward.dot(toEnemy)
 
-  // Phaser beam has some spread — wider at close range
-  const minDot = Math.max(0.85, 1.0 - (30 / Math.max(dist, 1)))
-
-  if (dot > minDot) {
+  if (dot > -0.5) {
+    // Enemy is within the auto-aim arc — hit!
     applyDamage(combat.enemyHealth, PHASER_DPS * delta)
     return true
   }

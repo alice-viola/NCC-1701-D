@@ -247,7 +247,11 @@ function gameLoop(): void {
   if (audioMgr) updateAudio(audioMgr, state)
 
   // ── Weapons & Shields ──
-  if (weaponState) updateWeapons(weaponState, state, sceneCtx.scene, shipGroup, delta)
+  // Pass enemy position for auto-aim when in active combat
+  const aimTarget = (missionPhase.value === 'active' && enemy && !combatState?.enemyHealth.isDestroyed)
+    ? enemy.position
+    : undefined
+  if (weaponState) updateWeapons(weaponState, state, sceneCtx.scene, shipGroup, delta, aimTarget)
   if (shieldState) updateShields(shieldState, state, elapsed, delta)
 
   // ── Enemy AI & Combat (only during active mission) ──

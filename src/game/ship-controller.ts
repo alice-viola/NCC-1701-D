@@ -26,9 +26,9 @@ const _forward = new THREE.Vector3()
  * speed, and weapon triggers.
  *
  * Controls:
- *   W/S   — Pitch (nose up / down)
- *   A/D   — Yaw (turn left / right)
- *   Q/E   — Roll (bank left / right)
+ *   S/W   — Pitch (nose up / down)
+ *   Q/E   — Yaw (turn left / right)
+ *   A/D   — Roll (bank left / right)
  *   0-9   — Set throttle directly
  *   Caps  — Toggle warp
  *   Shift — Toggle shields
@@ -45,12 +45,12 @@ export function updateShip(
   let yawDelta = 0
   let rollDelta = 0
 
-  if (input.isPressed('KeyW'))  pitchDelta = +PITCH_SPEED * delta
-  if (input.isPressed('KeyS'))  pitchDelta = -PITCH_SPEED * delta
-  if (input.isPressed('KeyA'))  yawDelta = +YAW_SPEED * delta
-  if (input.isPressed('KeyD'))  yawDelta = -YAW_SPEED * delta
-  if (input.isPressed('KeyQ'))  rollDelta = +ROLL_SPEED * delta
-  if (input.isPressed('KeyE'))  rollDelta = -ROLL_SPEED * delta
+  if (input.isPressed('KeyS'))  pitchDelta = +PITCH_SPEED * delta
+  if (input.isPressed('KeyW'))  pitchDelta = -PITCH_SPEED * delta
+  if (input.isPressed('KeyQ'))  yawDelta = +YAW_SPEED * delta
+  if (input.isPressed('KeyE'))  yawDelta = -YAW_SPEED * delta
+  if (input.isPressed('KeyA'))  rollDelta = +ROLL_SPEED * delta
+  if (input.isPressed('KeyD'))  rollDelta = -ROLL_SPEED * delta
 
   // Apply rotations in local space (pitch around X, yaw around Y, roll around Z)
   if (pitchDelta !== 0) {

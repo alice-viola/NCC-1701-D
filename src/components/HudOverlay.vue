@@ -120,9 +120,9 @@ const speed = computed(() => props.state.speed)
 
     <!-- Controls hint -->
     <div class="controls-hint">
-      <span>W/S: Pitch</span>
-      <span>A/D: Yaw</span>
-      <span>Q/E: Roll</span>
+      <span>S/W: Pitch</span>
+      <span>Q/E: Yaw</span>
+      <span>A/D: Roll</span>
       <span>0-9: Speed</span>
       <span>CAPS: Warp</span>
       <span>X: Shields</span>

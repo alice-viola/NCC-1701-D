@@ -222,6 +222,8 @@ export interface PhotonTorpedo {
   age: number
   maxAge: number
   trail: THREE.Points
+  /** Optional homing target — torpedo will steer toward this position */
+  targetPosition?: THREE.Vector3
 }
 
 const TORPEDO_SPEED = 80 // units/sec
@@ -300,10 +302,40 @@ export function createTorpedoMesh(
   }
 }
 
+const TORPEDO_HOMING_TURN = 3.0 // radians/sec — how fast the torpedo can steer
+
 /**
  * Updates torpedo position and trail each frame.
+ * If a targetPosition is set, the torpedo will home toward it.
  */
 export function updateTorpedo(torpedo: PhotonTorpedo, delta: number): void {
+  // ── Homing steering ──
+  if (torpedo.targetPosition) {
+    const toTarget = new THREE.Vector3().subVectors(torpedo.targetPosition, torpedo.mesh.position)
+    const dist = toTarget.length()
+
+    if (dist > 1) {
+      const desiredDir = toTarget.normalize()
+      const currentDir = torpedo.velocity.clone().normalize()
+      const currentSpeed = torpedo.velocity.length()
+
+      // Slerp the direction toward the target
+      const maxTurn = TORPEDO_HOMING_TURN * delta
+      const angle = currentDir.angleTo(desiredDir)
+
+      if (angle > 0.001) {
+        const t = Math.min(maxTurn / angle, 1)
+        currentDir.lerp(desiredDir, t).normalize()
+      }
+
+      torpedo.velocity.copy(currentDir).multiplyScalar(currentSpeed)
+
+      // Update mesh orientation to face travel direction
+      const lookTarget = torpedo.mesh.position.clone().add(torpedo.velocity)
+      torpedo.mesh.lookAt(lookTarget)
+    }
+  }
+
   torpedo.mesh.position.addScaledVector(torpedo.velocity, delta)
   torpedo.age += delta
 
