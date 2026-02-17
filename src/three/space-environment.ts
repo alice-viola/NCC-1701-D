@@ -30,7 +30,7 @@ export interface SystemObjects {
 // ---------------------------------------------------------------------------
 
 export function createNebulaSkybox(): SkyboxLayer {
-  const geo = new THREE.SphereGeometry(8000, 64, 64)
+  const geo = new THREE.SphereGeometry(8000, 32, 32)
 
   const mat = new THREE.ShaderMaterial({
     uniforms: {
@@ -96,6 +96,9 @@ export function createSystemObjects(system: StarSystem): SystemObjects {
       (Math.random() - 0.5) * 40,
       Math.sin(pDef.orbitAngle) * pDef.orbitRadius,
     )
+    // Store collision radius on the group for collision detection
+    group.userData.collisionRadius = pDef.radius
+
     // Override rotation speed from definition
     const planetMesh = group.children[0]
     if (planetMesh) {
@@ -145,12 +148,12 @@ export function disposeSystemObjects(objs: SystemObjects): void {
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 function resolveTexture(key: string): string {
-  return PLANET_TEXTURES[key] ?? PLANET_TEXTURES.moon
+  return (PLANET_TEXTURES as Record<string, string>)[key] ?? PLANET_TEXTURES.moon ?? ''
 }
 
 function createStar(system: StarSystem): THREE.Mesh {
   const starRadius = system.star.size * 50
-  const geo = new THREE.SphereGeometry(starRadius, 48, 48)
+  const geo = new THREE.SphereGeometry(starRadius, 24, 24)
   const color = new THREE.Color(STAR_COLORS[system.star.class])
 
   const mat = new THREE.ShaderMaterial({
@@ -197,7 +200,7 @@ function createStar(system: StarSystem): THREE.Mesh {
   mesh.userData.isStar = true
 
   // Add a glow sprite
-  const glowGeo = new THREE.SphereGeometry(starRadius * 2.5, 32, 32)
+  const glowGeo = new THREE.SphereGeometry(starRadius * 2.5, 16, 16)
   const glowMat = new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: color },
@@ -233,43 +236,8 @@ function createStar(system: StarSystem): THREE.Mesh {
   return mesh
 }
 
-function createStation(def: StationDef): THREE.Group {
-  const group = new THREE.Group()
-  group.name = def.name
-
-  // Position in orbit
-  group.position.set(
-    Math.cos(def.orbitAngle) * def.orbitRadius,
-    0,
-    Math.sin(def.orbitAngle) * def.orbitRadius,
-  )
-  group.userData.stationName = def.name
-  group.userData.rotSpeed = 0.0005
-
-  // Load the real ship model as the station (scaled up)
-  loadNpcModel().then(model => {
-    applyNpcMaterial(model, 0x99aabb, 0x223344, 0.7)
-    const stationScale = def.type === 'spacedock' ? 15 : def.type === 'starbase' ? 12 : 8
-    model.scale.multiplyScalar(stationScale)
-    group.add(model)
-  }).catch(() => {
-    // Fallback: simple geometry
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x8899aa, metalness: 0.7, roughness: 0.3,
-      emissive: 0x112233, emissiveIntensity: 0.3,
-    })
-    const disc = new THREE.Mesh(new THREE.CylinderGeometry(12, 12, 2, 32), mat)
-    group.add(disc)
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(3, 4, 20, 16), mat)
-    tower.position.y = -10
-    group.add(tower)
-  })
-
-  return group
-}
-
 function createRing(innerRadius: number, outerRadius: number, colorHex: string): THREE.Mesh {
-  const geo = new THREE.RingGeometry(innerRadius, outerRadius, 64)
+  const geo = new THREE.RingGeometry(innerRadius, outerRadius, 48)
   const mat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex),
     side: THREE.DoubleSide,
@@ -430,7 +398,7 @@ function createPlanetMesh(
   radius: number,
   textureUrl: string,
 ): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(radius, 64, 64)
+  const geo = new THREE.SphereGeometry(radius, 32, 32)
 
   // Load real NASA-based texture
   const loader = new THREE.TextureLoader()
@@ -495,41 +463,3 @@ function createPlanetMesh(
   return mesh
 }
 
-function createAtmosphere(planetRadius: number, color: THREE.Color): THREE.Mesh {
-  const geo = new THREE.SphereGeometry(planetRadius * 1.06, 48, 48)
-
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uColor: { value: color },
-    },
-    vertexShader: /* glsl */ `
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-
-      void main() {
-        vNormal = normalize(normalMatrix * normal);
-        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-        vViewDir = normalize(-mvPos.xyz);
-        gl_Position = projectionMatrix * mvPos;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uColor;
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-
-      void main() {
-        float fresnel = 1.0 - abs(dot(vNormal, vViewDir));
-        fresnel = pow(fresnel, 3.0);
-        float alpha = fresnel * 0.6;
-        gl_FragColor = vec4(uColor, alpha);
-      }
-    `,
-    transparent: true,
-    depthWrite: false,
-    side: THREE.FrontSide,
-    blending: THREE.AdditiveBlending,
-  })
-
-  return new THREE.Mesh(geo, mat)
-}

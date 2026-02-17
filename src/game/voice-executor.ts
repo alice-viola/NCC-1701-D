@@ -5,7 +5,6 @@
  * so the game behaves identically whether you press a key or speak a command.
  */
 
-import * as THREE from 'three'
 import type { GameState } from './game-state'
 import type { CommandAction } from './voice-commander'
 
@@ -111,7 +110,6 @@ export function executeVoiceCommand(
 }
 
 function buildDamageReport(gs: GameState): string {
-  const hullPct = 100 // player hull is tracked in combat state, not in gs directly
   const shields = gs.shieldsActive
     ? `Shields are up at ${Math.round(gs.shieldStrength)} percent.`
     : 'Shields are down.'

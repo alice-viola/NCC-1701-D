@@ -134,9 +134,11 @@ let voicePhaserBurstTimer = 0
 let autoPilotTarget: THREE.Vector3 | null = null
 const AUTO_PILOT_TURN_SPEED = 0.8 // rad/s
 
+/** Reusable vector for collision detection (avoid GC) */
+const _collisionVec = new THREE.Vector3()
+
 // ─── Briefing Voice ──────────────────────────────────────────────────────────
 
-let speechUtterance: SpeechSynthesisUtterance | null = null
 
 function startBriefing(): void {
   showStartButton.value = false
@@ -164,7 +166,7 @@ function startBriefing(): void {
       briefingCharIndex.value = BRIEFING_FULL_TEXT.length
     }
     speechSynthesis.speak(utter)
-    speechUtterance = utter
+    // utterance is managed by speechSynthesis
   }
 }
 
@@ -365,6 +367,44 @@ function gameLoop(): void {
     updateShip(state, input, delta)
   }
 
+  // ── Planet collision detection ──
+  if (systemObjs) {
+    for (const planetGroup of systemObjs.planets) {
+      const radius = planetGroup.userData.collisionRadius as number
+      if (!radius) continue
+
+      const toShip = _collisionVec.subVectors(state.position, planetGroup.position)
+      const dist = toShip.length()
+      const minDist = radius + 2 // 2 units buffer for ship size
+
+      if (dist < minDist) {
+        // Push ship out to the surface
+        toShip.normalize().multiplyScalar(minDist)
+        state.position.copy(planetGroup.position).add(toShip)
+        // Kill velocity to prevent sliding through
+        state.speed = Math.min(state.speed, 0.1)
+        state.throttle = Math.min(state.throttle, 0.1)
+        if (state.isWarp) state.isWarp = false
+      }
+    }
+
+    // Also check the star
+    if (systemObjs.star) {
+      const starRadius = (systemObjs.star.geometry as THREE.SphereGeometry).parameters.radius
+      const toShip = _collisionVec.subVectors(state.position, systemObjs.star.position)
+      const dist = toShip.length()
+      const minDist = starRadius + 5
+
+      if (dist < minDist) {
+        toShip.normalize().multiplyScalar(minDist)
+        state.position.copy(systemObjs.star.position).add(toShip)
+        state.speed = Math.min(state.speed, 0.1)
+        state.throttle = Math.min(state.throttle, 0.1)
+        if (state.isWarp) state.isWarp = false
+      }
+    }
+  }
+
   // Apply ship transform
   shipGroup.position.copy(state.position)
   shipGroup.quaternion.copy(state.quaternion)
@@ -437,15 +477,15 @@ function gameLoop(): void {
       const hits = checkTorpedoHits(combatState, torpPositions, enemy.position)
       // Remove hit torpedoes and spawn explosions (reverse order)
       for (let i = hits.length - 1; i >= 0; i--) {
-        const idx = hits[i]
-        const torp = weaponState.torpedoes[idx]
+        const idx = hits[i]!
+        const torp = weaponState.torpedoes[idx]!
         // Spawn torpedo explosion at impact point
         const exp = createExplosion(torp.mesh.position.clone(), 'torpedo')
         sceneCtx.scene.add(exp.group)
         explosions.push(exp)
         // Remove torpedo
         sceneCtx.scene.remove(torp.mesh)
-        torp.mesh.traverse(child => {
+        torp.mesh.traverse((child: THREE.Object3D) => {
           if (child instanceof THREE.Mesh || child instanceof THREE.Points) {
             child.geometry.dispose()
             if (Array.isArray(child.material)) {
@@ -501,7 +541,7 @@ function gameLoop(): void {
 
   // ── Update explosions ──
   for (let i = explosions.length - 1; i >= 0; i--) {
-    const exp = explosions[i]
+    const exp = explosions[i]!
     updateExplosion(exp, delta)
     if (exp.age >= exp.maxAge) {
       disposeExplosion(exp, sceneCtx.scene)

@@ -22,11 +22,11 @@ export function createScene(canvas: HTMLCanvasElement): SceneContext {
 
   const renderer = new THREE.WebGLRenderer({
     canvas,
-    antialias: true,
+    antialias: false, // SMAA post-processing handles AA — no need for MSAA
     powerPreference: 'high-performance',
   })
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5))
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 1.0
   renderer.outputColorSpace = THREE.SRGBColorSpace

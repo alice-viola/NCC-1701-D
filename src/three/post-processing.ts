@@ -47,9 +47,9 @@ export function createPostProcessing(
   const renderPass = new RenderPass(scene, camera)
   composer.addPass(renderPass)
 
-  // Bloom pass at full resolution
+  // Bloom pass at half resolution (bloom is a blur — no visual loss, big perf gain)
   const bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(pw, ph),
+    new THREE.Vector2(Math.floor(pw / 2), Math.floor(ph / 2)),
     0.2,  // strength
     0.2,  // radius
     0.95  // threshold
@@ -57,7 +57,7 @@ export function createPostProcessing(
   composer.addPass(bloomPass)
 
   // SMAA pass at full device pixel resolution
-  const smaaPass = new SMAAPass(pw, ph)
+  const smaaPass = new (SMAAPass as any)(pw, ph) as SMAAPass
   composer.addPass(smaaPass)
 
   // Warp effects pass (chromatic aberration, tunnel vignette, radial blur)
@@ -83,6 +83,6 @@ export function resizePostProcessing(
   const pw = Math.floor(width * pixelRatio)
   const ph = Math.floor(height * pixelRatio)
   setup.composer.setSize(width, height)
-  setup.bloomPass.resolution.set(pw, ph)
+  setup.bloomPass.resolution.set(Math.floor(pw / 2), Math.floor(ph / 2))
   setup.smaaPass.setSize(pw, ph)
 }

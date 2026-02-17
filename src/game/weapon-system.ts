@@ -43,7 +43,7 @@ export function updateWeapons(
   ws: WeaponSystemState,
   gameState: GameState,
   scene: THREE.Scene,
-  shipGroup: THREE.Group,
+  _shipGroup: THREE.Group,
   delta: number,
   enemyPosition?: THREE.Vector3,
 ): void {

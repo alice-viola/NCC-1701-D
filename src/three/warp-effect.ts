@@ -1,4 +1,3 @@
-import * as THREE from 'three'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 
 /**
@@ -140,6 +139,6 @@ export function updateWarpEffect(
 
   // Update shader uniforms
   const uniforms = warpState.pass.material.uniforms
-  uniforms.uIntensity.value = effectiveIntensity
-  uniforms.uTime.value = elapsed
+  if (uniforms.uIntensity) uniforms.uIntensity.value = effectiveIntensity
+  if (uniforms.uTime) uniforms.uTime.value = elapsed
 }

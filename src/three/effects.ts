@@ -106,9 +106,9 @@ export function updateExplosion(exp: Explosion, delta: number): void {
   // Move particles outward, slow them down over time
   const drag = 1 - lifeRatio * 0.8
   for (let i = 0; i < count; i++) {
-    positions[i * 3] += exp.velocities[i * 3] * delta * drag
-    positions[i * 3 + 1] += exp.velocities[i * 3 + 1] * delta * drag
-    positions[i * 3 + 2] += exp.velocities[i * 3 + 2] * delta * drag
+    positions[i * 3]! += exp.velocities[i * 3]! * delta * drag
+    positions[i * 3 + 1]! += exp.velocities[i * 3 + 1]! * delta * drag
+    positions[i * 3 + 2]! += exp.velocities[i * 3 + 2]! * delta * drag
   }
   posAttr.needsUpdate = true
 

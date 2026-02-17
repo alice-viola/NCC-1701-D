@@ -56,10 +56,10 @@ export interface VoiceCommanderState {
 }
 
 // SpeechRecognition may be vendor-prefixed
-const SpeechRecognitionCtor: typeof SpeechRecognition | undefined =
+const SpeechRecognitionCtor: (new () => any) | undefined =
   (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
 
-let recognition: SpeechRecognition | null = null
+let recognition: any = null
 
 export function createVoiceCommander(): VoiceCommanderState {
   return {
@@ -90,12 +90,11 @@ export function startListening(vc: VoiceCommanderState): void {
   vc.lastTranscript = ''
   vc.lastConfirmation = ''
 
-  recognition.onresult = (event: SpeechRecognitionEvent) => {
+  recognition.onresult = (event: any) => {
     const result = event.results[0]
     if (!result) return
 
     const transcript = result[0].transcript.toLowerCase().trim()
-    const confidence = result[0].confidence
 
     vc.status = 'processing'
     vc.lastTranscript = transcript
@@ -118,7 +117,7 @@ export function startListening(vc: VoiceCommanderState): void {
     }
   }
 
-  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+  recognition.onerror = (event: any) => {
     if (event.error === 'no-speech') {
       vc.lastConfirmation = 'No speech detected'
     } else if (event.error === 'aborted') {
@@ -277,7 +276,7 @@ const COMMAND_PATTERNS: CommandPattern[] = [
       }
       // "speed 7" / "throttle 5" / "warp 3" etc.
       const speedMatch = transcript.match(/\b(?:speed|throttle|warp)\s+(\d)\b/)
-      if (speedMatch) {
+      if (speedMatch && speedMatch[1]) {
         return { type: 'SET_THROTTLE', speed: parseInt(speedMatch[1], 10) }
       }
       // "ahead full"

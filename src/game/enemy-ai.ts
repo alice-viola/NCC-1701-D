@@ -447,9 +447,9 @@ function buildProceduralBorgShip(group: THREE.Group): void {
 
   // Borg implant cubes
   const cubeGeo = new THREE.BoxGeometry(1, 1, 1)
-  for (const [cx, cy, cz] of [[0, 0.5, 0], [2, 0.3, -1], [-1.5, 0.4, 1.5], [0, -1, 3], [1, -1, -2]]) {
+  for (const [cx, cy, cz] of [[0, 0.5, 0], [2, 0.3, -1], [-1.5, 0.4, 1.5], [0, -1, 3], [1, -1, -2]] as const) {
     const cube = new THREE.Mesh(cubeGeo, borgGlowMat)
-    cube.position.set(cx, cy, cz)
+    cube.position.set(cx!, cy!, cz!)
     cube.rotation.set(Math.random(), Math.random(), Math.random())
     group.add(cube)
   }

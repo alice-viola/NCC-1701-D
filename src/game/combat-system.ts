@@ -13,7 +13,6 @@ import type { GameState } from './game-state'
 
 const PHASER_DPS = 8            // damage per second while beam is hitting
 const TORPEDO_DAMAGE = 18       // single torpedo hit damage
-const HIT_DISTANCE_PHASER = 20  // max distance for phaser hit check
 const HIT_DISTANCE_TORPEDO = 12 // torpedo proximity detonation
 const SHIELD_ABSORPTION = 0.7   // shields absorb 70% of damage
 
@@ -129,7 +128,7 @@ export function checkTorpedoHits(
 
   const hits: number[] = []
   for (let i = 0; i < torpedoPositions.length; i++) {
-    const dist = torpedoPositions[i].distanceTo(enemyPosition)
+    const dist = torpedoPositions[i]!.distanceTo(enemyPosition)
     if (dist < HIT_DISTANCE_TORPEDO) {
       applyDamage(combat.enemyHealth, TORPEDO_DAMAGE)
       hits.push(i)
