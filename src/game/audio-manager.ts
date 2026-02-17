@@ -32,6 +32,10 @@ export interface AudioManager {
   initialized: boolean
   buffers: Map<string, AudioBuffer>
 
+  /** Pre-fetched raw ArrayBuffers (before AudioContext is available) */
+  rawBuffers: Map<string, ArrayBuffer>
+  prefetching: boolean
+
   // Looping sources (need to track for stop/modify)
   bridgeSource: AudioBufferSourceNode | null
   bridgeGain: GainNode | null
@@ -57,6 +61,8 @@ export function createAudioManager(): AudioManager {
     masterGain: null,
     initialized: false,
     buffers: new Map(),
+    rawBuffers: new Map(),
+    prefetching: false,
     bridgeSource: null,
     bridgeGain: null,
     engineSource: null,
@@ -73,19 +79,54 @@ export function createAudioManager(): AudioManager {
 }
 
 // ---------------------------------------------------------------------------
-// Init — must be called within a user gesture
+// Prefetch — call as early as possible (no user gesture needed)
 // ---------------------------------------------------------------------------
 
 /**
- * Create AudioContext and start loading samples immediately.
- * The context may be suspended (browser policy) — call resumeAudio()
- * on a user gesture to unlock it. Samples load in the background
- * regardless of suspended state.
+ * Start fetching all audio files as raw ArrayBuffers. No AudioContext needed.
+ * Call this during loading screen so files are ready when the context is created.
+ */
+export function prefetchAudio(am: AudioManager): void {
+  if (am.prefetching) return
+  am.prefetching = true
+
+  const entries = Object.entries(SOUNDS)
+  console.log(`[Audio] Prefetching ${entries.length} samples...`)
+
+  for (const [key, url] of entries) {
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.arrayBuffer()
+      })
+      .then(buf => {
+        am.rawBuffers.set(key, buf)
+        // If context is already available, decode immediately
+        if (am.ctx && !am.buffers.has(key)) {
+          am.ctx.decodeAudioData(buf.slice(0)).then(decoded => {
+            am.buffers.set(key, decoded)
+            // Auto-start bridge ambient once available
+            if (key === 'bridgeAmbient') startBridgeAmbient(am)
+          }).catch(() => { /* ok */ })
+        }
+      })
+      .catch(err => console.warn(`[Audio] Prefetch ${key} failed:`, err))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Init — MUST be called from a user gesture (click, keydown, touchstart)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create AudioContext and decode prefetched samples.
+ * Must be called from a user gesture handler to work on iOS/mobile.
  */
 export function initAudio(am: AudioManager): void {
   if (am.initialized) return
   try {
     am.ctx = new AudioContext()
+    if (am.ctx.state === 'suspended') am.ctx.resume()
 
     am.masterGain = am.ctx.createGain()
     am.masterGain.gain.value = 0.7
@@ -94,21 +135,53 @@ export function initAudio(am: AudioManager): void {
     am.initialized = true
     console.log('[Audio] AudioContext created, state:', am.ctx.state)
 
-    // Load all samples in background (works even when context is suspended)
-    loadAllSamples(am)
+    // Decode any already-prefetched raw buffers
+    decodePrefetchedBuffers(am)
+
+    // If prefetch hasn't started yet, do a full load
+    if (!am.prefetching) {
+      loadAllSamples(am)
+    }
   } catch (err) {
     console.warn('[Audio] Init failed:', err)
   }
 }
 
 /**
- * Resume a suspended AudioContext — must be called from a user gesture
- * (click, keydown, touchstart). Safe to call multiple times.
+ * Resume a suspended AudioContext — must be called from a user gesture.
+ * Also ensures AudioContext exists (creates one if needed).
  */
 export function resumeAudio(am: AudioManager): void {
-  if (am.ctx && am.ctx.state === 'suspended') {
+  if (!am.initialized) {
+    initAudio(am)
+  } else if (am.ctx && am.ctx.state === 'suspended') {
     am.ctx.resume()
   }
+}
+
+/** Decode any raw ArrayBuffers that were prefetched before the AudioContext existed */
+async function decodePrefetchedBuffers(am: AudioManager): Promise<void> {
+  if (!am.ctx) return
+
+  const toProcess = [...am.rawBuffers.entries()].filter(([key]) => !am.buffers.has(key))
+  console.log(`[Audio] Decoding ${toProcess.length} prefetched samples...`)
+
+  let decoded = 0
+  await Promise.allSettled(
+    toProcess.map(async ([key, raw]) => {
+      try {
+        // slice(0) because decodeAudioData detaches the ArrayBuffer
+        const audioBuffer = await am.ctx!.decodeAudioData(raw.slice(0))
+        am.buffers.set(key, audioBuffer)
+        decoded++
+      } catch (err) {
+        console.warn(`[Audio] Decode ${key} failed:`, err)
+      }
+    })
+  )
+
+  console.log(`[Audio] ${decoded} prefetched samples decoded`)
+  startBridgeAmbient(am)
 }
 
 async function loadAllSamples(am: AudioManager): Promise<void> {
@@ -120,6 +193,9 @@ async function loadAllSamples(am: AudioManager): Promise<void> {
   const results = await Promise.allSettled(
     entries.map(async ([key, url]) => {
       try {
+        // Skip if already decoded from prefetch
+        if (am.buffers.has(key)) return
+
         const response = await fetch(url)
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const arrayBuffer = await response.arrayBuffer()

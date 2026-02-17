@@ -26,7 +26,7 @@ import type { ShieldSystemState } from '../game/shield-system'
 import HudOverlay from './HudOverlay.vue'
 import TouchControls from './TouchControls.vue'
 import DesktopControls from './DesktopControls.vue'
-import { createAudioManager, initAudio, resumeAudio, updateAudio, disposeAudio } from '../game/audio-manager'
+import { createAudioManager, prefetchAudio, resumeAudio, updateAudio, disposeAudio } from '../game/audio-manager'
 import type { AudioManager } from '../game/audio-manager'
 import { updateWarpEffect } from '../three/warp-effect'
 import {
@@ -707,15 +707,15 @@ onMounted(async () => {
     sceneCtx.scene.add(systemObjs.root)
   }
 
-  // Init audio immediately — starts loading samples while loading screen is up
+  // Start prefetching audio files immediately (no user gesture needed)
   if (audioMgr) {
-    initAudio(audioMgr)
+    prefetchAudio(audioMgr)
   }
 
-  // Resume audio context on first user gesture (browser policy)
+  // Create AudioContext on first user gesture (required on iOS/mobile)
   const resumeAudioOnce = () => {
     if (audioMgr) {
-      resumeAudio(audioMgr)
+      resumeAudio(audioMgr) // creates context if needed, resumes if suspended
     }
     if (audioMgr?.ctx?.state === 'running') {
       window.removeEventListener('keydown', resumeAudioOnce)
