@@ -115,16 +115,18 @@ export function updateWeapons(
   if (gameState.torpedoFiring && gameState.torpedoCount > 0) {
     _origin.copy(TORPEDO_ORIGIN_OFFSET).applyQuaternion(gameState.quaternion).add(gameState.position)
 
-    // Auto-aim at enemy if available
-    if (enemyPosition) {
+    // Auto-aim at enemy if available and within torpedo lock range (500 units)
+    const torpedoLockRange = 500
+    const enemyInRange = enemyPosition && _origin.distanceTo(enemyPosition) < torpedoLockRange
+    if (enemyInRange) {
       _direction.subVectors(enemyPosition, _origin).normalize()
     } else {
       _direction.set(0, 0, -1).applyQuaternion(gameState.quaternion)
     }
 
     const torpedo = createTorpedoMesh(_origin, _direction)
-    // Set homing target so torpedo tracks the enemy
-    if (enemyPosition) {
+    // Set homing target so torpedo tracks the enemy (only if in range)
+    if (enemyInRange) {
       torpedo.targetPosition = enemyPosition
     }
     scene.add(torpedo.mesh)

@@ -51,7 +51,7 @@ const INITIAL_TORPEDO_COUNT = 64
 
 export function createGameState(): GameState {
   return {
-    position: new THREE.Vector3(0, 0, 0),
+    position: new THREE.Vector3(350, 0, 0),  // Start near Earth orbit, outside the star
     quaternion: new THREE.Quaternion(),
     velocity: new THREE.Vector3(0, 0, 0),
 

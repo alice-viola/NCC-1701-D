@@ -76,11 +76,16 @@ export function createAudioManager(): AudioManager {
 // Init — must be called within a user gesture
 // ---------------------------------------------------------------------------
 
+/**
+ * Create AudioContext and start loading samples immediately.
+ * The context may be suspended (browser policy) — call resumeAudio()
+ * on a user gesture to unlock it. Samples load in the background
+ * regardless of suspended state.
+ */
 export function initAudio(am: AudioManager): void {
   if (am.initialized) return
   try {
     am.ctx = new AudioContext()
-    if (am.ctx.state === 'suspended') am.ctx.resume()
 
     am.masterGain = am.ctx.createGain()
     am.masterGain.gain.value = 0.7
@@ -89,10 +94,20 @@ export function initAudio(am: AudioManager): void {
     am.initialized = true
     console.log('[Audio] AudioContext created, state:', am.ctx.state)
 
-    // Load all samples in background
+    // Load all samples in background (works even when context is suspended)
     loadAllSamples(am)
   } catch (err) {
     console.warn('[Audio] Init failed:', err)
+  }
+}
+
+/**
+ * Resume a suspended AudioContext — must be called from a user gesture
+ * (click, keydown, touchstart). Safe to call multiple times.
+ */
+export function resumeAudio(am: AudioManager): void {
+  if (am.ctx && am.ctx.state === 'suspended') {
+    am.ctx.resume()
   }
 }
 

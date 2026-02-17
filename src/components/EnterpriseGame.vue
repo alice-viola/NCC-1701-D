@@ -26,7 +26,7 @@ import type { ShieldSystemState } from '../game/shield-system'
 import HudOverlay from './HudOverlay.vue'
 import TouchControls from './TouchControls.vue'
 import DesktopControls from './DesktopControls.vue'
-import { createAudioManager, initAudio, updateAudio, disposeAudio } from '../game/audio-manager'
+import { createAudioManager, initAudio, resumeAudio, updateAudio, disposeAudio } from '../game/audio-manager'
 import type { AudioManager } from '../game/audio-manager'
 import { updateWarpEffect } from '../three/warp-effect'
 import {
@@ -116,7 +116,6 @@ let systemObjs: SystemObjects | null = null
 let weaponState: WeaponSystemState | null = null
 let shieldState: ShieldSystemState | null = null
 let audioMgr: AudioManager | null = null
-let audioInitialized = false
 let animFrameId = 0
 let freeCam: FreeCameraState | null = null
 let combatState: CombatState | null = null
@@ -708,17 +707,25 @@ onMounted(async () => {
     sceneCtx.scene.add(systemObjs.root)
   }
 
-  // Init audio on first user interaction
-  const initAudioOnce = () => {
-    if (!audioInitialized && audioMgr) {
-      audioInitialized = true
-      window.removeEventListener('keydown', initAudioOnce)
-      window.removeEventListener('click', initAudioOnce)
-      initAudio(audioMgr)
+  // Init audio immediately — starts loading samples while loading screen is up
+  if (audioMgr) {
+    initAudio(audioMgr)
+  }
+
+  // Resume audio context on first user gesture (browser policy)
+  const resumeAudioOnce = () => {
+    if (audioMgr) {
+      resumeAudio(audioMgr)
+    }
+    if (audioMgr?.ctx?.state === 'running') {
+      window.removeEventListener('keydown', resumeAudioOnce)
+      window.removeEventListener('click', resumeAudioOnce)
+      window.removeEventListener('touchstart', resumeAudioOnce)
     }
   }
-  window.addEventListener('keydown', initAudioOnce)
-  window.addEventListener('click', initAudioOnce)
+  window.addEventListener('keydown', resumeAudioOnce)
+  window.addEventListener('click', resumeAudioOnce)
+  window.addEventListener('touchstart', resumeAudioOnce)
 
   // Ship group
   shipGroup = new THREE.Group()
@@ -804,6 +811,20 @@ onUnmounted(() => {
             <div class="loading-bar" :style="{ width: loadProgress + '%' }" />
           </div>
           <div class="loading-text">INITIALIZING SYSTEMS... {{ loadProgress }}%</div>
+          <div class="loading-disclaimer">
+            Unofficial fan project. Star Trek and related marks are trademarks of Paramount Global. Not affiliated with or endorsed by Paramount.
+          </div>
+          <a
+            class="github-link loading-github"
+            href="https://github.com/alice-viola/NCC-1701-D"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+            <span>View on GitHub</span>
+          </a>
         </div>
       </div>
     </Transition>
@@ -952,6 +973,20 @@ onUnmounted(() => {
       @voice="onTouchVoice"
     />
 
+    <!-- GitHub corner link -->
+    <a
+      v-if="!isLoading"
+      class="github-link github-corner"
+      href="https://github.com/alice-viola/NCC-1701-D"
+      target="_blank"
+      rel="noopener noreferrer"
+      title="View on GitHub"
+    >
+      <svg class="github-icon" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+      </svg>
+    </a>
+
     <!-- HUD overlay -->
     <HudOverlay
       v-if="!isLoading"
@@ -1037,6 +1072,69 @@ onUnmounted(() => {
   font-size: 0.75rem;
   letter-spacing: 0.3rem;
   color: #556677;
+}
+
+.loading-disclaimer {
+  margin-top: 2.5rem;
+  font-size: 0.5rem;
+  letter-spacing: 0.05rem;
+  color: #334455;
+  max-width: 400px;
+  line-height: 1.5;
+}
+
+/* GitHub link */
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  color: #667788;
+  transition: all 0.2s;
+  pointer-events: auto;
+}
+
+.github-link:hover {
+  color: #aabbcc;
+}
+
+.github-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.loading-github {
+  margin-top: 1.5rem;
+  padding: 6px 14px;
+  border: 1px solid rgba(100, 120, 140, 0.25);
+  border-radius: 6px;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 0.6rem;
+  letter-spacing: 0.05rem;
+  background: rgba(100, 120, 140, 0.08);
+}
+
+.loading-github:hover {
+  background: rgba(100, 120, 140, 0.15);
+  border-color: rgba(100, 120, 140, 0.4);
+}
+
+.github-corner {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  z-index: 6;
+  opacity: 0.25;
+  padding: 6px;
+}
+
+.github-corner:hover {
+  opacity: 0.7;
+}
+
+.github-corner .github-icon {
+  width: 22px;
+  height: 22px;
 }
 
 .fade-enter-active,
@@ -1128,8 +1226,8 @@ onUnmounted(() => {
 .start-mission-container {
   position: absolute;
   top: 16px;
-  right: 20px;
-  text-align: right;
+  left: 20px;
+  text-align: left;
   z-index: 8;
 }
 

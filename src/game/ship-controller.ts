@@ -87,9 +87,15 @@ export function updateShip(
     state.isWarp = false
   }
 
-  // Compute effective speed
-  const baseSpeed = state.throttle * IMPULSE_MAX_SPEED
-  state.speed = state.isWarp ? baseSpeed * WARP_MULTIPLIER : baseSpeed
+  // Compute effective speed with smooth acceleration
+  const targetSpeed = state.throttle * IMPULSE_MAX_SPEED
+  const effectiveTarget = state.isWarp ? targetSpeed * WARP_MULTIPLIER : targetSpeed
+  const accelRate = 2.5 // how fast speed ramps (units per second)
+  if (state.speed < effectiveTarget) {
+    state.speed = Math.min(effectiveTarget, state.speed + accelRate * delta)
+  } else if (state.speed > effectiveTarget) {
+    state.speed = Math.max(effectiveTarget, state.speed - accelRate * delta)
+  }
 
   // --- Position ---
   // Ship forward is -Z in local space (Three.js convention)
