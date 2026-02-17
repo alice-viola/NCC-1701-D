@@ -44,6 +44,13 @@ import type { CombatState } from '../game/combat-system'
 import { createEnemyShip, updateEnemyAI, disposeEnemy } from '../game/enemy-ai'
 import type { EnemyShip } from '../game/enemy-ai'
 
+// Voice Commands
+import {
+  createVoiceCommander, toggleListening, updateVoiceCommander, disposeVoiceCommander,
+} from '../game/voice-commander'
+import type { VoiceCommanderState } from '../game/voice-commander'
+import { executeVoiceCommand } from '../game/voice-executor'
+
 // ─── Reactive UI State ────────────────────────────────────────────────────────
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -112,6 +119,20 @@ let freeCam: FreeCameraState | null = null
 let combatState: CombatState | null = null
 let enemy: EnemyShip | null = null
 const explosions: Explosion[] = []
+let voiceCmd: VoiceCommanderState | null = null
+
+// Reactive voice HUD state
+const voiceStatus = ref<'idle' | 'listening' | 'processing' | 'success' | 'error'>('idle')
+const voiceTranscript = ref('')
+const voiceConfirmation = ref('')
+const voiceSupported = ref(false)
+
+/** Timer to auto-fire phasers for a burst when triggered by voice */
+let voicePhaserBurstTimer = 0
+
+/** Auto-pilot: target position to fly toward (set by NAVIGATE_TO voice command) */
+let autoPilotTarget: THREE.Vector3 | null = null
+const AUTO_PILOT_TURN_SPEED = 0.8 // rad/s
 
 // ─── Briefing Voice ──────────────────────────────────────────────────────────
 
@@ -165,6 +186,35 @@ function startMission(): void {
   }
 }
 
+// ─── Navigation Target Resolution ────────────────────────────────────────────
+
+/** Planet orbit data from universe definitions (Sol system) */
+const PLANET_POSITIONS: Record<string, { orbitRadius: number; orbitAngle: number }> = {
+  earth:   { orbitRadius: 400, orbitAngle: 0 },
+  mars:    { orbitRadius: 700, orbitAngle: 2.1 },
+  jupiter: { orbitRadius: 1400, orbitAngle: 3.8 },
+  saturn:  { orbitRadius: 2200, orbitAngle: 1.5 },
+}
+
+function resolveNavTarget(target: string): THREE.Vector3 | null {
+  // Named planet
+  const planetData = PLANET_POSITIONS[target]
+  if (planetData) {
+    return new THREE.Vector3(
+      Math.cos(planetData.orbitAngle) * planetData.orbitRadius,
+      0,
+      Math.sin(planetData.orbitAngle) * planetData.orbitRadius,
+    )
+  }
+
+  // "enemy" — navigate toward enemy ship
+  if (target === 'enemy' && enemy) {
+    return enemy.position.clone()
+  }
+
+  return null
+}
+
 // ─── Game Loop ────────────────────────────────────────────────────────────────
 
 function gameLoop(): void {
@@ -188,6 +238,112 @@ function gameLoop(): void {
   // Reset camera in photo mode (R key)
   if (input.wasJustPressed('KeyR') && freeCam?.active) {
     resetPhotoCamera(freeCam, sceneCtx.camera)
+  }
+
+  // ── Voice Commands (C key) ──
+  if (input.wasJustPressed('KeyC') && voiceCmd) {
+    toggleListening(voiceCmd)
+  }
+
+  if (voiceCmd) {
+    const commands = updateVoiceCommander(voiceCmd, delta)
+
+    // Execute any queued voice commands
+    for (const action of commands) {
+      if (state) {
+        const reportText = executeVoiceCommand(action, {
+          gameState: state,
+          onStartMission: () => {
+            if (missionPhase.value === 'free') startBriefing()
+          },
+          onNavigateTo: (target: string) => {
+            // Resolve target to a world position
+            const pos = resolveNavTarget(target)
+            if (pos) {
+              autoPilotTarget = pos
+              return true
+            }
+            return false
+          },
+          onDamageReport: () => {
+            const hullPct = combatState ? Math.round(combatState.playerHealth.hull) : 100
+            const shields = state!.shieldsActive
+              ? `Shields are up at ${Math.round(state!.shieldStrength)} percent.`
+              : 'Shields are down.'
+            return `Hull integrity at ${hullPct} percent. ${shields} Phaser banks at ${Math.round(state!.phaserCharge)} percent. ${state!.torpedoCount} torpedoes remaining.`
+          },
+          onStatusReport: () => {
+            const speed = state!.speedDisplay
+            const shields = state!.shieldsActive ? 'Shields up' : 'Shields down'
+            const dist = enemy ? Math.round(enemy.position.distanceTo(state!.position)) : 'unknown'
+            return `Speed: ${speed}. Heading ${state!.heading}. ${shields}. Enemy distance: ${dist}.`
+          },
+        })
+
+        // For voice-triggered phasers, fire a sustained burst
+        if (action.type === 'FIRE_PHASERS') {
+          voicePhaserBurstTimer = 2.0
+        }
+
+        // Speak report results
+        if (reportText && window.speechSynthesis) {
+          window.speechSynthesis.cancel()
+          const utterance = new SpeechSynthesisUtterance(reportText)
+          utterance.rate = 1.0
+          utterance.pitch = 0.9
+          utterance.volume = 0.7
+          window.speechSynthesis.speak(utterance)
+          voiceCmd.lastConfirmation = reportText
+        }
+      }
+    }
+
+    // Sync voice state to reactive refs for HUD
+    voiceStatus.value = voiceCmd.status
+    voiceTranscript.value = voiceCmd.lastTranscript
+    voiceConfirmation.value = voiceCmd.lastConfirmation
+  }
+
+  // Voice-triggered phaser burst (fire for a few seconds then stop)
+  if (voicePhaserBurstTimer > 0 && state) {
+    state.phaserFiring = true
+    voicePhaserBurstTimer -= delta
+    if (voicePhaserBurstTimer <= 0) {
+      voicePhaserBurstTimer = 0
+      // Don't force-stop if player is also holding Space
+      if (!input.isPressed('Space')) {
+        state.phaserFiring = false
+      }
+    }
+  }
+
+  // ── Auto-pilot (voice navigation) ──
+  if (autoPilotTarget && state) {
+    const toTarget = new THREE.Vector3().subVectors(autoPilotTarget, state.position)
+    const distToTarget = toTarget.length()
+
+    if (distToTarget < 50) {
+      // Arrived — disengage auto-pilot
+      autoPilotTarget = null
+    } else {
+      // Turn toward target
+      const lookMatrix = new THREE.Matrix4()
+      lookMatrix.lookAt(state.position, autoPilotTarget, new THREE.Vector3(0, 1, 0))
+      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(lookMatrix)
+
+      const t = Math.min(AUTO_PILOT_TURN_SPEED * delta, 1)
+      state.quaternion.slerp(targetQuat, t)
+      state.quaternion.normalize()
+
+      // Cancel auto-pilot if player manually steers (any WASDQE input)
+      if (
+        input.isPressed('KeyW') || input.isPressed('KeyS') ||
+        input.isPressed('KeyA') || input.isPressed('KeyD') ||
+        input.isPressed('KeyQ') || input.isPressed('KeyE')
+      ) {
+        autoPilotTarget = null
+      }
+    }
   }
 
   // ── Briefing text typewriter ──
@@ -442,7 +598,7 @@ onMounted(async () => {
   sceneCtx.scene.environment = envMap
 
   // Starfield
-  starfield = createStarfield(15000)
+  starfield = createStarfield(1000)
   sceneCtx.scene.add(starfield)
 
   // Nebula skybox
@@ -469,6 +625,10 @@ onMounted(async () => {
 
   // Free camera
   freeCam = createFreeCameraState()
+
+  // Voice command system
+  voiceCmd = createVoiceCommander()
+  voiceSupported.value = voiceCmd.supported
 
   // Load Sol system (our playground)
   const solSystem = getSystem('sol')
@@ -551,6 +711,7 @@ onUnmounted(() => {
     for (const exp of explosions) disposeExplosion(exp, sceneCtx.scene)
     explosions.length = 0
   }
+  if (voiceCmd) disposeVoiceCommander(voiceCmd)
   if (speechSynthesis.speaking) speechSynthesis.cancel()
   if (sceneCtx) {
     sceneCtx.renderer.dispose()
@@ -699,7 +860,13 @@ onUnmounted(() => {
     </Transition>
 
     <!-- HUD overlay -->
-    <HudOverlay :state="hudState" />
+    <HudOverlay
+      :state="hudState"
+      :voice-status="voiceStatus"
+      :voice-transcript="voiceTranscript"
+      :voice-confirmation="voiceConfirmation"
+      :voice-supported="voiceSupported"
+    />
   </div>
 </template>
 

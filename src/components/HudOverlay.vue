@@ -4,6 +4,10 @@ import type { HudState } from '../game/game-state'
 
 const props = defineProps<{
   state: HudState
+  voiceStatus?: 'idle' | 'listening' | 'processing' | 'success' | 'error'
+  voiceTranscript?: string
+  voiceConfirmation?: string
+  voiceSupported?: boolean
 }>()
 
 const heading = computed(() => String(props.state.heading).padStart(3, '0'))
@@ -118,6 +122,28 @@ const speed = computed(() => props.state.speed)
       <div class="speed-line right" :style="{ opacity: Math.min(speed * 0.4, 0.8) }" />
     </div>
 
+    <!-- Voice Command Indicator -->
+    <Transition name="voice-fade">
+      <div v-if="voiceStatus && voiceStatus !== 'idle'" class="voice-indicator" :class="voiceStatus">
+        <div class="voice-icon">
+          <div v-if="voiceStatus === 'listening'" class="voice-pulse" />
+          <span class="voice-icon-text">&#x1F399;</span>
+        </div>
+        <div class="voice-content">
+          <div class="voice-label">
+            <template v-if="voiceStatus === 'listening'">LISTENING...</template>
+            <template v-else-if="voiceStatus === 'processing'">PROCESSING...</template>
+            <template v-else-if="voiceStatus === 'success'">COMMAND ACKNOWLEDGED</template>
+            <template v-else-if="voiceStatus === 'error'">COMMAND FAILED</template>
+          </div>
+          <div v-if="voiceTranscript" class="voice-transcript">"{{ voiceTranscript }}"</div>
+          <div v-if="voiceConfirmation && voiceStatus !== 'listening'" class="voice-confirmation">
+            {{ voiceConfirmation }}
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Controls hint -->
     <div class="controls-hint">
       <span>S/W: Pitch</span>
@@ -129,6 +155,7 @@ const speed = computed(() => props.state.speed)
       <span>SPACE: Phasers</span>
       <span>T: Torpedo</span>
       <span>F: Photo Mode</span>
+      <span v-if="voiceSupported" class="voice-key">C: Voice</span>
     </div>
   </div>
 </template>
@@ -445,6 +472,127 @@ const speed = computed(() => props.state.speed)
   width: 120px;
 }
 
+/* ---- Voice Command Indicator ---- */
+.voice-indicator {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid rgba(204, 136, 51, 0.3);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  min-width: 200px;
+}
+
+.voice-indicator.listening {
+  border-color: rgba(68, 170, 255, 0.5);
+  box-shadow: 0 0 20px rgba(68, 170, 255, 0.15);
+}
+
+.voice-indicator.processing {
+  border-color: rgba(255, 170, 50, 0.5);
+}
+
+.voice-indicator.success {
+  border-color: rgba(68, 255, 100, 0.4);
+}
+
+.voice-indicator.error {
+  border-color: rgba(255, 80, 60, 0.4);
+}
+
+.voice-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.voice-icon-text {
+  font-size: 1.2rem;
+  filter: grayscale(1) brightness(1.5);
+}
+
+.voice-pulse {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(68, 170, 255, 0.6);
+  animation: voicePulse 1.2s ease-out infinite;
+}
+
+@keyframes voicePulse {
+  0% {
+    transform: scale(0.8);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.voice-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voice-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.15rem;
+  color: #cc8833;
+}
+
+.listening .voice-label {
+  color: #44aaff;
+}
+
+.success .voice-label {
+  color: #44ff66;
+}
+
+.error .voice-label {
+  color: #ff5544;
+}
+
+.voice-transcript {
+  font-size: 0.65rem;
+  color: rgba(200, 180, 150, 0.8);
+  font-style: italic;
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voice-confirmation {
+  font-size: 0.6rem;
+  color: rgba(150, 140, 120, 0.7);
+  letter-spacing: 0.05rem;
+}
+
+/* Transition */
+.voice-fade-enter-active {
+  transition: all 0.2s ease-out;
+}
+.voice-fade-leave-active {
+  transition: all 0.3s ease-in;
+}
+.voice-fade-enter-from,
+.voice-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-10px);
+}
+
 /* ---- Controls Hint ---- */
 .controls-hint {
   position: absolute;
@@ -456,5 +604,9 @@ const speed = computed(() => props.state.speed)
   font-size: 0.65rem;
   letter-spacing: 0.08rem;
   color: rgba(150, 140, 120, 0.6);
+}
+
+.voice-key {
+  color: rgba(68, 170, 255, 0.6);
 }
 </style>
