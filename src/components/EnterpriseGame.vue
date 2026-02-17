@@ -24,6 +24,8 @@ import type { Explosion } from '../three/effects'
 import { createShieldSystem, updateShields } from '../game/shield-system'
 import type { ShieldSystemState } from '../game/shield-system'
 import HudOverlay from './HudOverlay.vue'
+import TouchControls from './TouchControls.vue'
+import DesktopControls from './DesktopControls.vue'
 import { createAudioManager, initAudio, updateAudio, disposeAudio } from '../game/audio-manager'
 import type { AudioManager } from '../game/audio-manager'
 import { updateWarpEffect } from '../three/warp-effect'
@@ -58,6 +60,7 @@ const isLoading = ref(true)
 const loadProgress = ref(0)
 const warpFlash = ref(0)
 const photoMode = ref(false)
+const isTouchDevice = ref(false)
 
 let prevWarpState = false
 
@@ -591,6 +594,31 @@ function onWindowResize(): void {
   )
 }
 
+// ─── Touch Control Handlers ──────────────────────────────────────────────────
+
+function onTouchThrottle(speed: number): void {
+  if (!state) return
+  state.throttle = speed === 0 ? 0 : speed / 9
+}
+
+function onTouchWarp(): void {
+  if (!input) return
+  input.simulateKeyDown('CapsLock')
+  setTimeout(() => input?.simulateKeyUp('CapsLock'), 100)
+}
+
+function onTouchShields(): void {
+  if (!input) return
+  input.simulateKeyDown('KeyX')
+  setTimeout(() => input?.simulateKeyUp('KeyX'), 100)
+}
+
+function onTouchVoice(): void {
+  if (!input) return
+  input.simulateKeyDown('KeyC')
+  setTimeout(() => input?.simulateKeyUp('KeyC'), 100)
+}
+
 // ─── Restart Game ─────────────────────────────────────────────────────────────
 
 function restartGame(): void {
@@ -629,6 +657,9 @@ function restartGame(): void {
 
 onMounted(async () => {
   if (!canvasRef.value) return
+
+  // Detect touch device
+  isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
 
   // Scene setup
   sceneCtx = createScene(canvasRef.value)
@@ -899,13 +930,38 @@ onUnmounted(() => {
       </div>
     </Transition>
 
+    <!-- Touch Controls (mobile only) -->
+    <TouchControls
+      v-if="!isLoading && isTouchDevice && input"
+      :input="input"
+      @throttle="onTouchThrottle"
+      @warp="onTouchWarp"
+      @shields="onTouchShields"
+      @voice="onTouchVoice"
+    />
+
+    <!-- Desktop Controls (keyboard + mouse bar) -->
+    <DesktopControls
+      v-if="!isLoading && !isTouchDevice && input"
+      :input="input"
+      :state="hudState"
+      :voice-supported="voiceSupported"
+      @throttle="onTouchThrottle"
+      @warp="onTouchWarp"
+      @shields="onTouchShields"
+      @voice="onTouchVoice"
+    />
+
     <!-- HUD overlay -->
     <HudOverlay
+      v-if="!isLoading"
       :state="hudState"
       :voice-status="voiceStatus"
       :voice-transcript="voiceTranscript"
       :voice-confirmation="voiceConfirmation"
       :voice-supported="voiceSupported"
+      :mission-active="missionPhase === 'active'"
+      :hide-controls="true"
     />
   </div>
 </template>
@@ -1071,47 +1127,46 @@ onUnmounted(() => {
 
 .start-mission-container {
   position: absolute;
-  bottom: 100px;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
+  top: 16px;
+  right: 20px;
+  text-align: right;
   z-index: 8;
 }
 
 .start-mission-subtitle {
   font-family: 'Segoe UI', sans-serif;
-  font-size: 0.65rem;
-  letter-spacing: 0.4rem;
+  font-size: 0.5rem;
+  letter-spacing: 0.2rem;
   color: #6688aa;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .start-mission-hint {
   font-family: 'Segoe UI', sans-serif;
-  font-size: 0.55rem;
-  letter-spacing: 0.15rem;
+  font-size: 0.45rem;
+  letter-spacing: 0.1rem;
   color: #445566;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .start-mission-btn {
   background: linear-gradient(135deg, #cc7700, #ff9900);
   color: #000;
   border: none;
-  padding: 14px 48px;
-  border-radius: 24px;
+  padding: 8px 24px;
+  border-radius: 16px;
   font-family: 'Segoe UI', sans-serif;
-  font-size: 0.85rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  letter-spacing: 0.3rem;
+  letter-spacing: 0.2rem;
   cursor: pointer;
   transition: all 0.3s;
-  box-shadow: 0 0 30px rgba(204, 119, 0, 0.3);
+  box-shadow: 0 0 20px rgba(204, 119, 0, 0.25);
 }
 
 .start-mission-btn:hover {
   background: linear-gradient(135deg, #ff9900, #ffbb33);
-  box-shadow: 0 0 50px rgba(255, 153, 0, 0.5);
+  box-shadow: 0 0 30px rgba(255, 153, 0, 0.4);
   transform: scale(1.05);
 }
 
@@ -1413,5 +1468,116 @@ onUnmounted(() => {
 
 .endgame-panel .lcars-btn {
   margin-top: 8px;
+}
+
+/* ─── Mobile / Portrait Overrides ─────────────────────────────────────────── */
+@media (max-width: 768px), (orientation: portrait) {
+  /* Move start mission to top, below HUD panels */
+  .start-mission-container {
+    top: 50px;
+    right: 50%;
+    transform: translateX(50%);
+  }
+
+  .start-mission-subtitle,
+  .start-mission-hint {
+    display: none;
+  }
+
+  /* Compact combat HUD */
+  .combat-hud {
+    top: 55px;
+    padding: 0 8px;
+  }
+
+  .hull-bar {
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+
+  .hull-label {
+    font-size: 0.42rem;
+    min-width: 80px;
+    letter-spacing: 0.08rem;
+  }
+
+  .hull-track {
+    width: 100px;
+    height: 4px;
+  }
+
+  .hull-value {
+    font-size: 0.48rem;
+    min-width: 26px;
+  }
+
+  .enemy-info {
+    margin-left: 84px;
+    gap: 6px;
+  }
+
+  .enemy-dist {
+    font-size: 0.4rem;
+  }
+
+  .enemy-status {
+    font-size: 0.4rem;
+    padding: 1px 4px;
+  }
+
+  /* Compact briefing panel */
+  .briefing-panel {
+    padding: 20px;
+  }
+
+  .briefing-text {
+    font-size: 0.72rem;
+    line-height: 1.6;
+    min-height: 100px;
+  }
+
+  .briefing-starfleet {
+    font-size: 0.5rem;
+  }
+
+  .briefing-priority {
+    font-size: 0.45rem;
+  }
+
+  /* Compact endgame */
+  .endgame-icon {
+    font-size: 2.5rem;
+  }
+
+  .endgame-title {
+    font-size: 1.4rem;
+    letter-spacing: 0.3rem;
+  }
+
+  .endgame-subtitle {
+    font-size: 0.65rem;
+  }
+
+  .endgame-text {
+    font-size: 0.65rem;
+  }
+
+  .endgame-stats {
+    font-size: 0.55rem;
+  }
+
+  .loading-title {
+    font-size: 1.5rem;
+    letter-spacing: 0.4rem;
+  }
+
+  .loading-subtitle {
+    font-size: 0.8rem;
+    letter-spacing: 0.3rem;
+  }
+
+  .loading-bar-container {
+    width: 200px;
+  }
 }
 </style>

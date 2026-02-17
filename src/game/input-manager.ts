@@ -37,6 +37,19 @@ export class InputManager {
     // justPressed entries are consumed by wasJustPressed, nothing else needed
   }
 
+  /** Simulate a key press (for touch controls). */
+  simulateKeyDown(code: string): void {
+    if (!this.keys.has(code)) {
+      this.justPressed.add(code)
+    }
+    this.keys.add(code)
+  }
+
+  /** Simulate a key release (for touch controls). */
+  simulateKeyUp(code: string): void {
+    this.keys.delete(code)
+  }
+
   private onKeyDown = (e: KeyboardEvent): void => {
     // Prevent default for game keys so page doesn't scroll
     if (GAME_KEYS.has(e.code)) {

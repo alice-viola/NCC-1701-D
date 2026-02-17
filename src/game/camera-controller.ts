@@ -3,7 +3,11 @@ import type { GameState } from './game-state'
 
 // Camera offset behind and above the ship (in ship-local space)
 const BASE_OFFSET = new THREE.Vector3(0, 3.0, 11)
-const WARP_OFFSET = new THREE.Vector3(0, 3.0, 12)  // pull back further at warp
+const WARP_OFFSET = new THREE.Vector3(0, 3.0, 12)
+
+// Portrait/mobile: pull camera further back and higher
+const BASE_OFFSET_PORTRAIT = new THREE.Vector3(0, 4.0, 15)
+const WARP_OFFSET_PORTRAIT = new THREE.Vector3(0, 4.0, 17)
 
 // Smoothing factor (lower = smoother/laggier, higher = snappier)
 const POSITION_LERP = 3.0
@@ -12,6 +16,8 @@ const ROTATION_LERP = 4.0
 // FOV range — dramatic zoom at warp
 const FOV_MIN = 50    // stationary
 const FOV_MAX = 90    // warp speed (tunnel vision effect)
+const FOV_MIN_PORTRAIT = 90
+const FOV_MAX_PORTRAIT = 105
 
 const _desiredPos = new THREE.Vector3()
 const _offset = new THREE.Vector3()
@@ -27,9 +33,14 @@ export function updateCamera(
   state: GameState,
   delta: number,
 ): void {
+  // Pick offsets based on aspect ratio (portrait vs landscape)
+  const isPortrait = camera.aspect < 1.0
+  const baseOff = isPortrait ? BASE_OFFSET_PORTRAIT : BASE_OFFSET
+  const warpOff = isPortrait ? WARP_OFFSET_PORTRAIT : WARP_OFFSET
+
   // Compute world-space offset: lerp between normal and warp camera positions
   const warpLerp = state.isWarp ? Math.min(state.speed / 4, 1) : 0
-  _offset.lerpVectors(BASE_OFFSET, WARP_OFFSET, warpLerp)
+  _offset.lerpVectors(baseOff, warpOff, warpLerp)
   _offset.applyQuaternion(state.quaternion)
   _desiredPos.copy(state.position).add(_offset)
 
@@ -50,9 +61,11 @@ export function updateCamera(
   camera.lookAt(currentTarget)
 
   // Dynamic FOV based on speed — noticeable at impulse, dramatic at warp
-  const speedNorm = Math.min(state.speed / 3, 1) // hits max faster
-  const eased = speedNorm * speedNorm // quadratic for punch at higher speeds
-  const targetFov = FOV_MIN + (FOV_MAX - FOV_MIN) * eased
+  const fovMin = isPortrait ? FOV_MIN_PORTRAIT : FOV_MIN
+  const fovMax = isPortrait ? FOV_MAX_PORTRAIT : FOV_MAX
+  const speedNorm = Math.min(state.speed / 3, 1)
+  const eased = speedNorm * speedNorm
+  const targetFov = fovMin + (fovMax - fovMin) * eased
   camera.fov += (targetFov - camera.fov) * posAlpha
   camera.updateProjectionMatrix()
 }

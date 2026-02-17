@@ -8,6 +8,8 @@ const props = defineProps<{
   voiceTranscript?: string
   voiceConfirmation?: string
   voiceSupported?: boolean
+  missionActive?: boolean
+  hideControls?: boolean
 }>()
 
 const heading = computed(() => String(props.state.heading).padStart(3, '0'))
@@ -46,7 +48,7 @@ const speed = computed(() => props.state.speed)
     </div>
 
     <!-- Bottom left panel: Navigation -->
-    <div class="hud-panel bottom-left">
+    <div class="hud-panel bottom-left" :class="{ 'combat-offset': missionActive }">
       <div class="panel-header">
         <div class="lcars-pill amber" />
         <span>NAVIGATION</span>
@@ -79,7 +81,7 @@ const speed = computed(() => props.state.speed)
     </div>
 
     <!-- Bottom right panel: Tactical -->
-    <div class="hud-panel bottom-right">
+    <div class="hud-panel bottom-right" :class="{ 'combat-offset': missionActive }">
       <div class="panel-header">
         <div class="lcars-pill blue" />
         <span>TACTICAL</span>
@@ -144,8 +146,8 @@ const speed = computed(() => props.state.speed)
       </div>
     </Transition>
 
-    <!-- Controls hint -->
-    <div class="controls-hint">
+    <!-- Controls hint (hidden when desktop/touch controls are shown) -->
+    <div v-if="!hideControls" class="controls-hint">
       <span>S/W: Pitch</span>
       <span>Q/E: Yaw</span>
       <span>A/D: Roll</span>
@@ -608,5 +610,140 @@ const speed = computed(() => props.state.speed)
 
 .voice-key {
   color: rgba(68, 170, 255, 0.6);
+}
+
+/* ─── Mobile / Portrait layout ─── */
+@media (max-width: 768px), (orientation: portrait) {
+  /* Hide keyboard controls hint — touch buttons replace it */
+  .controls-hint {
+    display: none;
+  }
+
+  /* Move NAV panel from bottom-left to top-left (below title) */
+  .bottom-left {
+    bottom: auto;
+    top: 60px;
+    left: 8px;
+    transition: top 0.3s ease;
+    min-width: 0;
+    padding: 6px 10px;
+    font-size: 0.6rem;
+  }
+
+  /* Move TACTICAL panel from bottom-right to top-right */
+  .bottom-right {
+    bottom: auto;
+    top: 60px;
+    right: 8px;
+    transition: top 0.3s ease;
+    min-width: 0;
+    padding: 6px 10px;
+    font-size: 0.6rem;
+  }
+
+  /* Compact panel headers on mobile */
+  .panel-header {
+    font-size: 0.5rem;
+    margin-bottom: 4px;
+    padding-bottom: 3px;
+    gap: 4px;
+  }
+
+  .lcars-pill {
+    width: 24px;
+    height: 5px;
+  }
+
+  .panel-body {
+    gap: 2px;
+  }
+
+  .data-row {
+    font-size: 0.55rem;
+  }
+
+  .data-label {
+    font-size: 0.48rem;
+    min-width: 50px;
+  }
+
+  .data-value {
+    font-size: 0.6rem;
+  }
+
+  .bar-row {
+    font-size: 0.55rem;
+    gap: 4px;
+  }
+
+  .bar-container {
+    height: 4px;
+  }
+
+  .bar-value {
+    font-size: 0.5rem;
+    min-width: 24px;
+  }
+
+  /* Top bar compact */
+  .hud-top {
+    padding: 6px 12px;
+    gap: 6px;
+  }
+
+  .title-main {
+    font-size: 0.65rem;
+    letter-spacing: 0.2rem;
+  }
+
+  .title-registry {
+    font-size: 0.5rem;
+    letter-spacing: 0.15rem;
+  }
+
+  .lcars-bracket {
+    width: 40px;
+  }
+
+  /* Move voice indicator below panels */
+  .voice-indicator {
+    top: auto;
+    bottom: 200px;
+    padding: 6px 12px;
+    min-width: 160px;
+  }
+
+  .voice-label {
+    font-size: 0.55rem;
+  }
+
+  .voice-transcript {
+    font-size: 0.5rem;
+    max-width: 200px;
+  }
+
+  .voice-confirmation {
+    font-size: 0.48rem;
+  }
+
+  /* Push panels down when combat HUD is showing */
+  .bottom-left.combat-offset {
+    top: 140px;
+  }
+
+  .bottom-right.combat-offset {
+    top: 140px;
+  }
+
+  /* Smaller reticle */
+  .reticle {
+    width: 40px;
+    height: 40px;
+  }
+
+  .reticle-ring {
+    width: 28px;
+    height: 28px;
+  }
 }
 </style>
